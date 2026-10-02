@@ -1,0 +1,6 @@
+# Verification gates for this sandbox. `commandmate verify` / `wait --verify` run these.
+version: 1
+gates:
+  - id: unit
+    command: "npm test"
+    timeoutSec: 300

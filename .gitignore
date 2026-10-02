@@ -1,0 +1,7 @@
+node_modules/
+.commandmate/*
+!.commandmate/verify.yaml
+!.commandmate/profile.json
+!.commandmate/agents.yaml
+acceptance-evidence/
+.commandcode/

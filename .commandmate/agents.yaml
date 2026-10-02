@@ -1,0 +1,3 @@
+# Repository default agents (CommandMate, Issue #2066): new worktrees start with these tabs.
+agents: [command-code, claude]
+primary: command-code
