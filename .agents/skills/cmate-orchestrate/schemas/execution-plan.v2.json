@@ -1,0 +1,786 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Kewton/commandmate-skills/blob/main/skills/cmate-orchestrate/schemas/execution-plan.v2.json",
+  "title": "cmate-orchestrate execution plan v2",
+  "description": "Dry-run execution plan produced by the cmate-orchestrate plan-core runner. Closed schema: an unknown field is a contract violation, not something a reader may ignore. The plan is a pure function of its inputs, so the same input yields a byte-identical plan (Claude/Codex parity). v2 adds issues[].acceptance_gates. Consumers accept a v1 plan too (it simply declares no acceptance gates), but the planner only ever emits v2, so this is the shape that is schema-checked.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "plan_schema_version",
+    "skill_id",
+    "skill_version",
+    "run_id",
+    "generated_mode",
+    "profile",
+    "inputs",
+    "issues",
+    "dependencies",
+    "waves",
+    "merge_order",
+    "max_parallel",
+    "risk",
+    "permissions",
+    "commands",
+    "warnings",
+    "notes"
+  ],
+  "properties": {
+    "plan_schema_version": {
+      "const": 2
+    },
+    "skill_id": {
+      "const": "cmate-orchestrate"
+    },
+    "skill_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "run_id": {
+      "$ref": "#/$defs/run_id"
+    },
+    "generated_mode": {
+      "const": "dry-run"
+    },
+    "profile": {
+      "$ref": "#/$defs/profile"
+    },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "issues",
+        "base",
+        "profile_id",
+        "max_parallel",
+        "phase",
+        "infer",
+        "dependency_overrides",
+        "order"
+      ],
+      "properties": {
+        "issues": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/issue_number"
+          }
+        },
+        "base": {
+          "type": "string",
+          "minLength": 1
+        },
+        "profile_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "max_parallel": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3
+        },
+        "phase": {
+          "const": "plan"
+        },
+        "infer": {
+          "type": "boolean"
+        },
+        "dependency_overrides": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "order": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/issue_number"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/issue"
+      }
+    },
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/dependency"
+      }
+    },
+    "waves": {
+      "type": "array",
+      "description": "Ordered waves. Every issue appears in exactly one wave, except an issue marked `dispatch_excluded` (Issue #286), which appears in none; a later wave runs after all earlier waves complete. That is what the DEFAULT dispatch scheduling does with them. Under `dispatch.mjs --schedule dag` (Issue #183) they become REFERENCE INFORMATION: the dispatcher gates each issue on its own effective dependencies (this plan's `dependencies`, minus the `basis: lexical` edges section 3.1 of plan-contract.md refuses to treat as edges) and admits it as soon as they are completed + verified, so a wave boundary is no longer a synchronisation point. Two things they still ARE in that mode, and neither is optional: `merge_order` is this array flattened, and the packing rule that keeps two file-overlapping issues out of one wave is the rule the dag scheduler re-enforces itself (it never runs two issues that name a file in common at the same time). The planner is unchanged either way — it always computes and emits the waves.",
+      "items": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/issue_number"
+        }
+      }
+    },
+    "merge_order": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/issue_number"
+      }
+    },
+    "max_parallel": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3
+    },
+    "risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "level",
+        "factors"
+      ],
+      "properties": {
+        "level": {
+          "$ref": "#/$defs/severity"
+        },
+        "factors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "severity",
+              "detail"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "minLength": 1
+              },
+              "severity": {
+                "$ref": "#/$defs/severity"
+              },
+              "detail": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "permissions": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "filesystem_read",
+          "filesystem_write",
+          "network_access",
+          "process_execution",
+          "environment_read",
+          "credential_access"
+        ]
+      }
+    },
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "phase",
+          "command",
+          "mutating",
+          "executed"
+        ],
+        "properties": {
+          "phase": {
+            "enum": [
+              "analyze",
+              "verify"
+            ]
+          },
+          "command": {
+            "type": "string",
+            "minLength": 1
+          },
+          "mutating": {
+            "type": "boolean"
+          },
+          "executed": {
+            "const": false,
+            "description": "Always false: the plan-core runner never executes a command."
+          }
+        }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "description": "Plan-level warnings, in a fixed order (profile, then per-issue extraction, then contract scope, then unanswered questions, then cross-issue dependencies). plan.status is partial iff at least one entry is BLOCKING and success otherwise — see note_entry.severity, and note that what STOPS a run is issues[].questions, never plan.status. The same entries appear in the result envelope's warnings without severity: orchestrate-result.v1 is a closed v1 schema whose entry definition is shared with errors.",
+      "items": {
+        "$ref": "#/$defs/note_entry"
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "$defs": {
+    "observation": {
+      "description": "One post-merge measurement, as the profile declared it and the planner froze it (Issue #221). The kind decides which extra keys are required, and each shape is CLOSED: an unknown kind or a missing key is a profile load_error (exit 6), never a declaration the runner quietly skips \u2014 a run that dropped one would report a complete observation set that is missing the measurement the author asked for. `unit` is required and never converted: the runner records the number the source gave it, and the unit is the only thing that says what it means.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "workflow",
+            "unit"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/observation_id"
+            },
+            "kind": {
+              "const": "gh_run"
+            },
+            "workflow": {
+              "type": "string",
+              "minLength": 1
+            },
+            "unit": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "workflow",
+            "job",
+            "step",
+            "unit"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/observation_id"
+            },
+            "kind": {
+              "const": "gh_job_step"
+            },
+            "workflow": {
+              "type": "string",
+              "minLength": 1
+            },
+            "job": {
+              "type": "string",
+              "minLength": 1
+            },
+            "step": {
+              "type": "string",
+              "minLength": 1
+            },
+            "unit": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "command",
+            "unit"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/observation_id"
+            },
+            "kind": {
+              "const": "command"
+            },
+            "command": {
+              "type": "string",
+              "minLength": 1
+            },
+            "unit": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "observation_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+      "description": "Names one measurement. Used as a lookup key across documents \u2014 in the observe report and in the --inspect artifact a \"before\" value is matched out of \u2014 so it has to survive a round trip through a JSON key without being quoted."
+    },
+    "companion_rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "when",
+        "add"
+      ],
+      "properties": {
+        "when": {
+          "type": "string",
+          "minLength": 1
+        },
+        "add": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+    },
+    "issue_number": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "gate_id": {
+      "type": "string",
+      "description": "A CommandMate verification gate id. Mirrors GATE_ID_PATTERN in CommandMate's verify config and GATE_ID_RE in dispatch.mjs: an id this rejects is one `send --contract` would reject.",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,31}$"
+    },
+    "acceptance_gate_definitions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "description": "New command gates the issue DEFINES, in the author's order. Shape, bounds and reserved ids are CommandMate's own gate entry (validateGateEntries in verify-config, shared with the contract's verify.gateDefinitions since #1791), so an entry here is one `send --contract` accepts \u2014 including the #1771 / #1772 fields `mutex` / `retryOnFail` / `flakyIsPass`, which are written only when the author declared them (Issues #223 / #224). The id is issue-scoped — `issue-<number>-<what>` — which is checked, never rewritten. `timeoutSec` is absent when the author did not state one, and the contract stays silent about it too, so CommandMate's own default (600s) applies rather than a number this planner invented.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "command"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/gate_id"
+          },
+          "command": {
+            "type": "string",
+            "minLength": 1
+          },
+          "timeoutSec": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 7200
+          },
+          "mutex": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9_.-]+$",
+            "description": "OPTIONAL (Issue #223 / CommandMate #1771). Name of a machine-wide lock this gate must hold while it runs: only one gate declaring this name runs on the machine at a time. Declares what command and timeout cannot \u2014 a fixed port, a local database, an emulator \u2014 so two parallel worktrees running the gate at once stop producing a `GATE e2e FAIL exit=1` that reads exactly like the change being broken. Wider than a gate id because it names a RESOURCE rather than a gate (two repositories binding port 60303 may agree on `port.60303`), and narrow enough to be safe as a path segment because both runners turn it into `<lock-root>/<name>.lock`. ABSENT means this gate is exclusive of nothing."
+          },
+          "retryOnFail": {
+            "enum": [0, 1],
+            "description": "OPTIONAL (Issue #224 / CommandMate #1772). Re-run this gate once, in the same tree, when its command exits non-zero. Only 0 and 1: the ceiling IS the feature, because enough re-runs turn any red green, and one retry answers the one question worth asking \u2014 does this reproduce in the same tree. A timeout is never retried (the gate already spent its whole budget). ABSENT means the gate runs exactly once, which is what every gate did before this field existed."
+          },
+          "flakyIsPass": {
+            "type": "boolean",
+            "description": "OPTIONAL (Issue #224 / CommandMate #1772). Whether a FLAKY outcome \u2014 failed, then passed on the retry \u2014 counts as a pass. Default false: opting into a retry does not make the gate weaker, it only gives what happened a name. Declared per gate rather than per repository because it is a statement about THIS gate\u0027s failure mode. `true` requires `retryOnFail: 1` in the same entry, which the planner checks: without a retry there is no FLAKY for it to reclassify, so the declaration could never take effect."
+          }
+        }
+      }
+    },
+    "severity": {
+      "enum": [
+        "low",
+        "moderate",
+        "high"
+      ]
+    },
+    "repo_path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Repository-relative POSIX path, or a scope PATTERN in the vocabulary CommandMate's scope gate adjudicates (Issue #219): `**` crosses directory boundaries, `*` and `?` do not, `{a,b}` alternates, `[` and `]` are literal, and an entry that names a directory covers everything beneath it. A pattern reaches a plan only where the issue declared it under a deliverable heading. Nothing here is expanded — no runner opens a working tree — so this string is compared as a string. Whatever the shape: no leading slash, no backslash, no control character and no '..' segment, because a plan must not name anything outside the target repository.",
+      "pattern": "^(?!.*(?:^|/)\\.\\.(?:/|$))[^/\\\\\\u0000-\\u001f\\u007f][^\\\\\\u0000-\\u001f\\u007f]*$"
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "repository",
+        "base",
+        "branch_template",
+        "worktree_template",
+        "baseline",
+        "verified"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "repository": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"
+        },
+        "base": {
+          "type": "string",
+          "minLength": 1
+        },
+        "branch_template": {
+          "type": "string",
+          "minLength": 1
+        },
+        "worktree_template": {
+          "type": "string",
+          "minLength": 1
+        },
+        "baseline": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "verified": {
+          "type": "boolean"
+        },
+        "scope_companions": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "derive": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/companion_rule"
+              }
+            },
+            "require": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/companion_rule"
+              }
+            }
+          }
+        },
+        "dispatch_defaults": {
+          "description": "Optional repository-level operating defaults for the dispatch runner (Issue #180). Every key is optional and every one is overridden by the corresponding CLI flag; --no-auto-yes is how auto_yes is declined for a single run. no_infer is the planner's flag and is declared here only so one profile holds one declaration.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "no_infer": {
+              "type": "boolean"
+            },
+            "auto_yes": {
+              "type": "boolean"
+            },
+            "wait_timeout": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "max_turns": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "integration_baseline": {
+          "description": "Optional post-merge verification set for the merge runner's --integration-verify (Issue #195). It is the repository's definition of a green MERGED branch, kept apart from `baseline` because that list is each worker's proportional health check and the two have different purposes: making one right by sharing a key makes the other wrong. Resolved as integration_baseline ?? baseline on the KEY'S PRESENCE — an absent key runs `baseline` exactly as before this field existed, and a declared [] states that the repository has no integration verification, which --integration-verify refuses (preflight_failed / integration_verify_unavailable) rather than answering with `baseline`. Echoed by the planner only when the profile declared it, and last among the optional fields, so a plan built without it is byte-identical to the plans produced before it existed.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "observations": {
+          "description": "Optional post-merge measurements for the observe runner (Issue #221). Each entry declares ONE thing to measure on the base branch AFTER a merge \u2014 a workflow's wall clock (gh_run), one job step's seconds (gh_job_step), or a number a command prints in a throwaway checkout of the merge commit (command). The planner does not USE it: it validates it (scripts/lib.mjs normalizeObservations) and echoes it here so observe.mjs reads the declaration out of the approved plan, the same handoff dispatch_defaults (#196) and integration_baseline (#195) use. Echoed only when the profile declared it, and last among the optional fields, so a plan built without it is byte-identical to the plans produced before it existed. A declared [] states that the repository has no post-merge observation, which observe.mjs refuses by name (observations_undeclared) rather than reporting an empty collection as one that was made.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/observation"
+          }
+        },
+        "pr_title_template": {
+          "description": "Optional PR title template for the merge runner's --create-prs (CommandMate#3005). Placeholders are the closed set {{type}} / {{scope}} (from the branch's own Conventional-Commits commit subjects; when they do not determine a value, that PR is NOT opened and the phase stops with pr_title_undetermined), {{title}} (the issue title) and {{number}} (the issue number). Absent keeps the pre-#3005 title (the issue title). Echoed by the planner only when the profile declared it, and last among the optional fields, so a plan built without it is byte-identical to the plans produced before it existed.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "worker_messages": {
+          "description": "Optional text the runners append to the messages they send workers (CommandMate#3009). `nudge` is appended AFTER dispatch's default supervision nudge and `fix_nudge` AFTER uat's default fix nudge (#288), never in place of them. Echoed only when the profile declared it, and last among the optional fields.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "nudge": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000
+            },
+            "fix_nudge": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000
+            }
+          }
+        }
+      }
+    },
+    "issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "number",
+        "title",
+        "objective",
+        "acceptance_criteria",
+        "acceptance_gates",
+        "suspected_files",
+        "scope_defaults",
+        "reference_files",
+        "test_expectations",
+        "labels",
+        "branch",
+        "worktree",
+        "worktree_id",
+        "questions",
+        "classification"
+      ],
+      "properties": {
+        "number": {
+          "$ref": "#/$defs/issue_number"
+        },
+        "title": {
+          "type": "string"
+        },
+        "objective": {
+          "type": "string"
+        },
+        "acceptance_criteria": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "acceptance_gates": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "version",
+                "require"
+              ],
+              "properties": {
+                "version": {
+                  "const": 1
+                },
+                "require": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 32,
+                  "items": {
+                    "$ref": "#/$defs/gate_id"
+                  }
+                },
+                "gates": {
+                  "$ref": "#/$defs/acceptance_gate_definitions"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "version",
+                "require",
+                "gates"
+              ],
+              "properties": {
+                "version": {
+                  "const": 1
+                },
+                "require": {
+                  "type": "array",
+                  "maxItems": 0,
+                  "items": {
+                    "$ref": "#/$defs/gate_id"
+                  }
+                },
+                "gates": {
+                  "$ref": "#/$defs/acceptance_gate_definitions"
+                }
+              }
+            }
+          ],
+          "description": "Transcription of the issue body's ```acceptance-gates block (references/acceptance-gates-notation.md). Null means the body carries no such block, OR that it carries one the planner refused to read — the two are told apart by the acceptance_gate_block_invalid open question, never by this field. `require` names gate ids that MUST take part in the verdict and already exist in the target repository; `gates` DEFINES new ones, which the dispatch runner carries in the execution contract's verify.gateDefinitions (CommandMate #1791) and never writes into `.commandmate/verify.yaml`. Both are transcribed in the author's order and are a COPY, not a re-encoding. The `gates` key is absent — not an empty list — when the block defines nothing, so an issue that only uses `require:` produces the plan bytes it produced before the key existed. The two branches above say that at least one of the two lists is non-empty: an empty block is a syntax error, not an issue without gates. The planner checks syntax and issue-scoping only: it never opens the target repository, so `require` ids and definition-id collisions are resolved against `<worktree>/.commandmate/verify.yaml` by the dispatch runner, which refuses the issue before `send` (ADR §3.4, §3.5)."
+        },
+        "suspected_files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/repo_path"
+          },
+          "description": "The files the worker is allowed to change: this list becomes the dispatch contract's scope.allow verbatim. Paths under the agent harness (.claude/skills/**, .agents/skills/**, .commandmate/**) are NOT here by default even when the issue names them — a worker able to edit the runner that judges it can pass by rewriting the judge — and enter only when the issue declares them under a deliverable heading (## 対象ファイル), which raises the harness_path_in_scope warning. Entries may be scope PATTERNS as well as paths (Issue #219): a glob or a trailing-slash directory written under a deliverable heading lands here verbatim and is reported by the scope_pattern_declared notice, since a plan cannot list what a pattern covers without opening a working tree. See references/plan-contract.md sections 5.3 and 5.7."
+        },
+        "scope_defaults": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/repo_path"
+          },
+          "description": "Paths the planner allowed by default because a file the issue DID name mechanically drags them along: the same-directory lockfiles of a dependency manifest (package.json -> package-lock.json), and the conventional test paths of a declared source file (src/session.ts -> src/session.test.ts, src/session.spec.ts, src/__tests__/session.ts, ...; session.go -> session_test.go). Every entry is derived from a declared path — no bare glob is ever added, and a derivation from a declared PATTERN is itself a pattern (src/{a,b}/x.ts -> src/{a,b}/x.test.ts), which is still a pure function of the declaration (Issue #219) — and all of them are already included in suspected_files. Listed here so a reviewer sees which scope entries the planner added rather than read in the issue. See references/adr-scope-derivation.md."
+        },
+        "reference_files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/repo_path"
+          },
+          "description": "Paths the planner read out of the issue and deliberately kept OUT of scope.allow: context the issue only cites (under a 根拠 / 参考 / references heading, or documentation named nowhere else), and agent-harness paths denied by default (.claude/skills/**, .agents/skills/**, .commandmate/**). The worker reads them; it may not write them. A path missing from suspected_files is otherwise indistinguishable from one the planner never noticed, so a drop is reported here rather than discarded. See references/plan-contract.md sections 5 and 5.3."
+        },
+        "test_expectations": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "branch": {
+          "type": "string",
+          "minLength": 1
+        },
+        "worktree": {
+          "type": "string",
+          "minLength": 1
+        },
+        "worktree_id": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "minLength": 1
+            }
+          ],
+          "description": "Resolved by `commandmate sync` at dispatch time. Null when sync is unavailable (optional per ADR #1447)."
+        },
+        "questions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Blocking questions for this issue. The dispatch runner refuses an issue carrying any of them unless --allow-questions is passed, so this array — not plan.status — is what stops a run. Each entry also appears in plan.warnings under the private code that produced it: open_question_declared (the issue body's ```open-questions block says the AUTHOR has not decided this; the sentence is transcribed verbatim, in the author's order — references/open-questions-notation.md), open_question_block_invalid (that block could not be read and is NOT treated as absent), acceptance_gate_block_invalid (the ```acceptance-gates block, likewise — including a `gates:` definition whose id is not scoped to this issue), no_acceptance_criteria, no_suspected_files, ambiguous_file_candidate, acceptance_requires_tests_but_scope_has_none, unconfirmed_lexical_dependency. Every code but the first is the planner reporting something it could not READ; the first is the author reporting something they have not DECIDED, and it is raised before the others for that reason. See references/plan-contract.md sections 5.4 and 5.5 and references/codes-and-recovery.md."
+        },
+        "classification": {
+          "enum": [
+            "independent",
+            "dependent",
+            "conflicting"
+          ]
+        },
+        "dispatch_excluded": {
+          "enum": [
+            "human_only"
+          ],
+          "description": "Present ONLY on an issue that no dispatch sends a worker to (Issue #286). human_only: the issue's labels hold exactly `human-only` (the fixed name cmate-issue-authoring's validator reads) — a person does it. Such an issue stays in `issues` and in `dependencies` so the reader keeps its edges and the human work in view, but it is in no wave and not in merge_order, its questions are not raised (they ask what a worker would need), and dispatch.mjs records it as `not_dispatched` without treating it as a failure. An edge from a dispatched issue to it is not waited for, the same way an edge to an issue outside the plan is not (warning human_only_dependency). Absent means dispatchable, which is every issue a plan without the label holds, so such a plan is byte-identical to the one written before the field existed. See references/plan-contract.md section 3.3."
+        }
+      }
+    },
+    "dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "issue",
+        "depends_on",
+        "kind",
+        "reason"
+      ],
+      "properties": {
+        "issue": {
+          "$ref": "#/$defs/issue_number"
+        },
+        "depends_on": {
+          "$ref": "#/$defs/issue_number"
+        },
+        "kind": {
+          "enum": [
+            "explicit",
+            "inferred",
+            "override"
+          ],
+          "description": "explicit: stated in the issue body. inferred: a consumer of a shared contract, from the heuristic. override: supplied by the caller."
+        },
+        "basis": {
+          "enum": [
+            "declared",
+            "file_conflict",
+            "lexical"
+          ],
+          "description": "What grounds the edge, which is not the same question as who stated it. declared: a human wrote it (every explicit and override edge). file_conflict: inferred, and the two issues name at least one suspected file in common — the reason names it. lexical: inferred from shared topic tokens alone. A lexical-only inference is NOT an edge and therefore never appears in this array: the planner raises the unconfirmed_lexical_dependency question on the consumer instead, so ordering follows only from a statement or from the files. This planner always emits the field; it is not in `required` because it was added without raising plan_schema_version, so a plan.json written by 0.27.0 or earlier — which status.mjs still reads — has no basis on its edges and stays valid. Absent means \"written before the distinction existed\", never \"ungrounded\". See references/plan-contract.md section 3.1."
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "note_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "detail"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1
+        },
+        "severity": {
+          "enum": [
+            "blocking",
+            "notice"
+          ],
+          "description": "Whether this warning drops plan.status to partial (Issue #199). OPTIONAL and FAIL-CLOSED: an entry with NO severity is blocking, which is what every warning was before this field existed and what every code outside the notice set still is — so a plan.json written by an older planner stays valid and keeps its meaning, the same rule dependencies[].basis follows. The planner writes the field on notice entries only, so a plan that raises none is byte-identical to the one the pre-#199 planner produced; blocking is therefore a value this schema admits and this planner never emits. A code is a notice when the warning reports a decision a human ALREADY MADE and declared, rather than one still owed or something the planner could not read. The set holds FIVE codes: harness_path_in_scope, where the issue DECLARED an agent-harness path under a deliverable heading (references/plan-contract.md section 5.3); profile_repository_override (Issue #210), which cannot be raised unless the operator passed BOTH --repo (which downgrades the profile's verification) and --allow-unverified (without which the run exits 3); and scope_pattern_declared / scope_pattern_dropped (Issue #219), which report the scope patterns the issue wrote under a deliverable heading and the ones it wrote outside every deliverable heading — three author declarations and one operator declaration, the same side of the same principle. scope_pattern_dropped is on that side because what it reports is not \"the planner could not read this\" but \"the planner did not read this as a declaration\", a fact about where the author wrote it; prose_path_ignored (CommandMate #3002) is on the same side for the same reason — an issue that HAS a deliverable heading has declared its scope, and a path it wrote only outside that heading is reported as not read as a declaration (it goes to reference_files). What is declared is what decides it, not that something was declared: open_question_declared is the author stating they have NOT decided, and is blocking. Every code that can reach plan.warnings is classified with its reason, blocking ones included, in references/codes-and-recovery.md section 2; a new code is classified before it is added. Membership is an independent judgement per code — there is no bulk move. A notice never masks a blocking warning: status is partial if ANY entry is blocking. See references/plan-contract.md section 5.6."
+        }
+      }
+    }
+  }
+}

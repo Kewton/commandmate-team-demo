@@ -1,0 +1,367 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Kewton/commandmate-skills/blob/main/skills/cmate-worktree-setup/schemas/worktree-setup.result.v1.json",
+  "title": "cmate-worktree-setup result v1",
+  "description": "Structured result returned by the cmate-worktree-setup Skill. Closed schema: an unknown field is a contract violation, not something a reader may ignore. No absolute machine path, token or secret ever appears here; the setup either created every planned worktree or it says which phase it stopped at and why.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "result_schema_version",
+    "skill_id",
+    "skill_version",
+    "generated_at",
+    "status",
+    "phase_reached",
+    "request",
+    "repository",
+    "profile",
+    "plan",
+    "worktrees",
+    "baseline",
+    "commandmate_sync",
+    "collisions",
+    "redactions",
+    "next_actions",
+    "blocking_reasons",
+    "limitations",
+    "completion_check",
+    "summary_markdown"
+  ],
+  "properties": {
+    "result_schema_version": { "const": 1 },
+    "skill_id": { "const": "cmate-worktree-setup" },
+    "skill_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "generated_at": { "$ref": "#/$defs/timestamp" },
+    "status": {
+      "enum": ["success", "partial", "failure"],
+      "description": "success: every requested worktree was created and its baseline passed. partial: at least one worktree was created but a baseline failed, sync was unavailable, or an issue was skipped for collision; created worktrees are retained. failure: no worktree was created."
+    },
+    "phase_reached": {
+      "enum": ["inspect", "plan", "create", "baseline", "sync", "complete"],
+      "description": "The furthest phase the run reached. A failure at inspect or plan means nothing was created."
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issue_numbers", "max_issues", "reuse_existing"],
+      "properties": {
+        "issue_numbers": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "integer", "minimum": 1 },
+          "description": "Positive integers only. A non-integer or a value below 1 is rejected before any inspection."
+        },
+        "max_issues": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Upper bound on how many issues one run may set up. issue_numbers longer than this is truncated and the drop is recorded in limitations."
+        },
+        "profile_override": {
+          "enum": ["node", "rust", "unverified", null],
+          "description": "The profile the caller pinned, or null to let detection decide."
+        },
+        "base_override": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "A base ref the caller pinned instead of the profile default. Recorded, never a machine path."
+        },
+        "reuse_existing": {
+          "type": "boolean",
+          "description": "True only when the caller explicitly asked to reuse an exact-match branch/directory/worktree. Never inferred."
+        }
+      }
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slug", "current_branch", "integration_branch", "default_base", "remote_name", "dirty"],
+      "properties": {
+        "slug": {
+          "type": ["string", "null"],
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$",
+          "description": "owner/name derived from the remote. null when no remote resolves. The repository root is never reported as an absolute path."
+        },
+        "current_branch": { "type": ["string", "null"], "maxLength": 200 },
+        "integration_branch": {
+          "type": ["string", "null"],
+          "maxLength": 200,
+          "description": "The branch worktree work integrates back into, resolved from the profile, not hardcoded."
+        },
+        "default_base": { "type": ["string", "null"], "maxLength": 200 },
+        "remote_name": { "type": ["string", "null"], "maxLength": 100 },
+        "dirty": {
+          "type": ["boolean", "null"],
+          "description": "Whether the integration worktree had uncommitted changes. A dirty integration worktree is never modified."
+        }
+      }
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["selected", "verified", "detection_evidence", "base_ref", "base_sha", "branch_template", "directory_template", "baseline_command"],
+      "properties": {
+        "selected": {
+          "enum": ["node", "rust", "unverified"],
+          "description": "node = Node/CommandMate, rust = Rust/CommandAgent. unverified = detected neither cleanly; used only after the caller confirms it before the run."
+        },
+        "verified": {
+          "type": "boolean",
+          "description": "True only for node and rust, the two profiles with recorded behaviour. Always false for unverified."
+        },
+        "detection_evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["signal", "path"],
+            "properties": {
+              "signal": { "type": "string", "minLength": 1, "maxLength": 200 },
+              "path": { "$ref": "#/$defs/repo_path" }
+            }
+          },
+          "description": "The repository-relative files that decided the profile. Empty allows only the unverified selection."
+        },
+        "base_ref": { "type": ["string", "null"], "minLength": 1, "maxLength": 200 },
+        "base_sha": { "$ref": "#/$defs/git_sha_nullable" },
+        "branch_template": { "type": ["string", "null"], "maxLength": 200 },
+        "directory_template": { "type": ["string", "null"], "maxLength": 200 },
+        "baseline_command": {
+          "type": ["string", "null"],
+          "maxLength": 500,
+          "description": "The proportional baseline the profile prescribes. Never hardcoded to npm or cargo; resolved from the profile."
+        }
+      }
+    },
+    "plan": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/plan_entry" },
+      "description": "The dry-run plan per issue, computed before anything is created. Empty only when the run failed at inspect."
+    },
+    "worktrees": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/worktree_entry" },
+      "description": "One entry per worktree the run acted on. created=false with reused=false means it was planned but not made."
+    },
+    "baseline": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/baseline_entry" }
+    },
+    "commandmate_sync": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["available", "attempted", "worktree_id", "detail"],
+      "properties": {
+        "available": {
+          "type": "boolean",
+          "description": "Whether the CommandMate worktree-sync path is usable here: a CLI that has `commandmate sync` and a server it can reach. False is not a failure: sync is optional."
+        },
+        "attempted": { "type": "boolean" },
+        "worktree_id": {
+          "type": ["string", "null"],
+          "maxLength": 200,
+          "description": "The CommandMate worktree id, resolved from `commandmate ls --json` after the sync. Sync itself reports a re-scan, not an id. null when sync was unusable or the id could not be resolved; never a guess."
+        },
+        "detail": { "type": "string", "minLength": 1, "maxLength": 300 }
+      }
+    },
+    "collisions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/collision" },
+      "description": "Every existing branch, directory or worktree that matched a planned target. A collision blocks creation unless reuse_existing was set for an exact match."
+    },
+    "redactions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "count"],
+        "properties": {
+          "kind": { "$ref": "#/$defs/redaction_kind" },
+          "count": { "type": "integer", "minimum": 1 }
+        }
+      },
+      "description": "Kind and count only. The redacted value never appears, here or anywhere else in the document."
+    },
+    "next_actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["action", "owner"],
+        "properties": {
+          "action": { "type": "string", "minLength": 1, "maxLength": 300 },
+          "owner": { "type": "string", "minLength": 1, "maxLength": 100 }
+        }
+      }
+    },
+    "blocking_reasons": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 300 },
+      "description": "Why the run could not proceed. Non-empty whenever status is failure."
+    },
+    "limitations": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 300 },
+      "description": "Capabilities that were unavailable and the fallback taken, plus any dropped issues."
+    },
+    "completion_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passed", "checks"],
+      "properties": {
+        "passed": { "type": "boolean" },
+        "checks": {
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "passed", "detail"],
+            "properties": {
+              "id": {
+                "enum": [
+                  "input_validated",
+                  "plan_confirmed",
+                  "no_implicit_overwrite",
+                  "base_reconfirmed",
+                  "baseline_reported",
+                  "no_secret_or_abspath"
+                ]
+              },
+              "passed": { "type": "boolean" },
+              "detail": { "type": "string", "minLength": 1, "maxLength": 300 }
+            }
+          }
+        }
+      }
+    },
+    "summary_markdown": { "type": "string", "minLength": 1 }
+  },
+  "$defs": {
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+      "description": "RFC 3339 in UTC, second precision."
+    },
+    "git_sha_nullable": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9a-f]{40}$",
+      "description": "A resolved commit SHA, or null before one was resolved. A symbolic ref alone is never enough to record a base."
+    },
+    "repo_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "description": "Repository-relative POSIX path. No leading slash, no backslash, no control character and no '..' segment: a result must not be able to name anything outside the repository or leak a machine-absolute path.",
+      "pattern": "^(?!.*(?:^|/)\\.\\.(?:/|$))[^/\\\\\\u0000-\\u001f\\u007f][^\\\\\\u0000-\\u001f\\u007f]*$"
+    },
+    "collision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issue_number", "kind", "detail"],
+      "properties": {
+        "issue_number": { "type": "integer", "minimum": 1 },
+        "kind": {
+          "enum": ["local_branch", "remote_branch", "directory", "worktree"],
+          "description": "What already exists. worktree is decided from `git worktree list --porcelain`, never from a substring grep."
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "description": "The existing name, redacted of any absolute path."
+        }
+      }
+    },
+    "plan_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issue_number", "branch", "directory", "base_ref", "base_sha", "baseline_command", "sync_planned", "blocked_by"],
+      "properties": {
+        "issue_number": { "type": "integer", "minimum": 1 },
+        "branch": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "directory": { "$ref": "#/$defs/repo_path" },
+        "base_ref": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "base_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$",
+          "description": "The base resolved to a commit SHA at plan time. The branch is created from this SHA, not from the symbolic ref alone."
+        },
+        "baseline_command": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "sync_planned": {
+          "type": "boolean",
+          "description": "Whether CommandMate sync is intended for this worktree. False when sync is unavailable."
+        },
+        "blocked_by": {
+          "type": "array",
+          "items": { "enum": ["local_branch", "remote_branch", "directory", "worktree"] },
+          "description": "Collision kinds that block creating this entry. Empty means the entry is clear to create."
+        }
+      }
+    },
+    "worktree_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issue_number", "branch", "directory", "base_sha", "created", "reused"],
+      "properties": {
+        "issue_number": { "type": "integer", "minimum": 1 },
+        "branch": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "directory": { "$ref": "#/$defs/repo_path" },
+        "base_sha": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{40}$",
+          "description": "The SHA re-confirmed immediately before creation. null when the entry was not created."
+        },
+        "created": { "type": "boolean" },
+        "reused": {
+          "type": "boolean",
+          "description": "True only when reuse_existing was set and an exact-match target was reused. created and reused are never both true."
+        },
+        "note": { "type": ["string", "null"], "maxLength": 300 }
+      }
+    },
+    "baseline_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issue_number", "command", "outcome", "exit_code", "redacted"],
+      "properties": {
+        "issue_number": { "type": "integer", "minimum": 1 },
+        "command": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "outcome": {
+          "enum": ["pass", "fail", "not_run", "skipped"],
+          "description": "Measured, never rounded. A failed baseline is fail, and the worktree that produced it is retained for diagnosis."
+        },
+        "exit_code": {
+          "type": ["integer", "null"],
+          "minimum": -1,
+          "maximum": 255,
+          "description": "The measured exit code. null when the command was killed, timed out or never ran; never write 0 in that case."
+        },
+        "redacted": {
+          "type": "boolean",
+          "description": "Whether output_excerpt had secrets or absolute paths removed before it was recorded."
+        },
+        "output_excerpt": {
+          "type": ["string", "null"],
+          "maxLength": 2000,
+          "description": "A short, redacted tail of the output for diagnosis. The full raw terminal stream is never stored."
+        }
+      }
+    },
+    "redaction_kind": {
+      "enum": [
+        "github_token",
+        "cloud_access_key",
+        "private_key",
+        "bearer_token",
+        "api_key",
+        "signed_url",
+        "absolute_path",
+        "environment_secret",
+        "personal_data"
+      ]
+    }
+  }
+}

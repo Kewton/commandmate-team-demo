@@ -1,0 +1,243 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Kewton/commandmate-skills/blob/main/skills/cmate-orchestrate/schemas/execution-plan.v1.json",
+  "title": "cmate-orchestrate execution plan v1",
+  "description": "Dry-run execution plan produced by the cmate-orchestrate plan-core runner. Closed schema: an unknown field is a contract violation, not something a reader may ignore. The plan is a pure function of its inputs, so the same input yields a byte-identical plan (Claude/Codex parity).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "plan_schema_version",
+    "skill_id",
+    "skill_version",
+    "run_id",
+    "generated_mode",
+    "profile",
+    "inputs",
+    "issues",
+    "dependencies",
+    "waves",
+    "merge_order",
+    "max_parallel",
+    "risk",
+    "permissions",
+    "commands",
+    "warnings",
+    "notes"
+  ],
+  "properties": {
+    "plan_schema_version": { "const": 1 },
+    "skill_id": { "const": "cmate-orchestrate" },
+    "skill_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "run_id": { "$ref": "#/$defs/run_id" },
+    "generated_mode": { "const": "dry-run" },
+    "profile": { "$ref": "#/$defs/profile" },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "issues",
+        "base",
+        "profile_id",
+        "max_parallel",
+        "phase",
+        "infer",
+        "dependency_overrides",
+        "order"
+      ],
+      "properties": {
+        "issues": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/issue_number" } },
+        "base": { "type": "string", "minLength": 1 },
+        "profile_id": { "type": "string", "minLength": 1 },
+        "max_parallel": { "type": "integer", "minimum": 1, "maximum": 3 },
+        "phase": { "const": "plan" },
+        "infer": { "type": "boolean" },
+        "dependency_overrides": { "type": "array", "items": { "type": "string" } },
+        "order": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "array", "items": { "$ref": "#/$defs/issue_number" } }
+          ]
+        }
+      }
+    },
+    "issues": { "type": "array", "items": { "$ref": "#/$defs/issue" } },
+    "dependencies": { "type": "array", "items": { "$ref": "#/$defs/dependency" } },
+    "waves": {
+      "type": "array",
+      "description": "Ordered waves. Every issue appears in exactly one wave; a later wave runs after all earlier waves complete.",
+      "items": { "type": "array", "items": { "$ref": "#/$defs/issue_number" } }
+    },
+    "merge_order": { "type": "array", "items": { "$ref": "#/$defs/issue_number" } },
+    "max_parallel": { "type": "integer", "minimum": 1, "maximum": 3 },
+    "risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "factors"],
+      "properties": {
+        "level": { "$ref": "#/$defs/severity" },
+        "factors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["code", "severity", "detail"],
+            "properties": {
+              "code": { "type": "string", "minLength": 1 },
+              "severity": { "$ref": "#/$defs/severity" },
+              "detail": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "permissions": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "filesystem_read",
+          "filesystem_write",
+          "network_access",
+          "process_execution",
+          "environment_read",
+          "credential_access"
+        ]
+      }
+    },
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["phase", "command", "mutating", "executed"],
+        "properties": {
+          "phase": { "enum": ["analyze", "verify"] },
+          "command": { "type": "string", "minLength": 1 },
+          "mutating": { "type": "boolean" },
+          "executed": {
+            "const": false,
+            "description": "Always false: the plan-core runner never executes a command."
+          }
+        }
+      }
+    },
+    "warnings": { "type": "array", "items": { "$ref": "#/$defs/note_entry" } },
+    "notes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  },
+  "$defs": {
+    "run_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+    "issue_number": { "type": "integer", "minimum": 1 },
+    "gate_id": {
+      "type": "string",
+      "description": "A CommandMate verification gate id. Mirrors GATE_ID_PATTERN in CommandMate's verify config and GATE_ID_RE in dispatch.mjs: an id this rejects is one `send --contract` would reject.",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,31}$"
+    },
+    "severity": { "enum": ["low", "moderate", "high"] },
+    "repo_path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Repository-relative POSIX path. No leading slash, no backslash, no control character and no '..' segment: a plan must not name anything outside the target repository.",
+      "pattern": "^(?!.*(?:^|/)\\.\\.(?:/|$))[^/\\\\\\u0000-\\u001f\\u007f][^\\\\\\u0000-\\u001f\\u007f]*$"
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "repository", "base", "branch_template", "worktree_template", "baseline", "verified"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "repository": { "type": "string", "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$" },
+        "base": { "type": "string", "minLength": 1 },
+        "branch_template": { "type": "string", "minLength": 1 },
+        "worktree_template": { "type": "string", "minLength": 1 },
+        "baseline": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "verified": { "type": "boolean" }
+      }
+    },
+    "issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "number",
+        "title",
+        "objective",
+        "acceptance_criteria",
+        "acceptance_gates",
+        "suspected_files",
+        "scope_defaults",
+        "reference_files",
+        "test_expectations",
+        "labels",
+        "branch",
+        "worktree",
+        "worktree_id",
+        "questions",
+        "classification"
+      ],
+      "properties": {
+        "number": { "$ref": "#/$defs/issue_number" },
+        "title": { "type": "string" },
+        "objective": { "type": "string" },
+        "acceptance_criteria": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "acceptance_gates": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["version", "require"],
+              "properties": {
+                "version": { "const": 1 },
+                "require": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 32,
+                  "items": { "$ref": "#/$defs/gate_id" }
+                }
+              }
+            }
+          ],
+          "description": "Transcription of the issue body's ```acceptance-gates block (references/acceptance-gates-notation.md). Null means the body carries no such block, OR that it carries one the planner refused to read — the two are told apart by the acceptance_gate_block_invalid / acceptance_gate_block_unsupported open question, never by this field. `require` names gate ids that MUST take part in the verdict; it is transcribed in the author's order and is a COPY, not a re-encoding. The planner checks syntax only: it never opens the target repository, so the ids are resolved against `<worktree>/.commandmate/verify.yaml` by the dispatch runner, which refuses the issue before `send` when one does not exist (ADR §3.4)."
+        },
+        "suspected_files": { "type": "array", "items": { "$ref": "#/$defs/repo_path" } },
+        "scope_defaults": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/repo_path" },
+          "description": "Lockfiles the planner allowed by default because the issue names their dependency manifest (e.g. package.json -> package-lock.json). Already included in suspected_files; listed here so a reviewer sees which scope entries the planner added rather than read in the issue."
+        },
+        "reference_files": { "type": "array", "items": { "$ref": "#/$defs/repo_path" } },
+        "test_expectations": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "labels": { "type": "array", "items": { "type": "string" } },
+        "branch": { "type": "string", "minLength": 1 },
+        "worktree": { "type": "string", "minLength": 1 },
+        "worktree_id": {
+          "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }],
+          "description": "Resolved by `commandmate sync` at dispatch time. Null when sync is unavailable (optional per ADR #1447)."
+        },
+        "questions": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "classification": { "enum": ["independent", "dependent", "conflicting"] }
+      }
+    },
+    "dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issue", "depends_on", "kind", "reason"],
+      "properties": {
+        "issue": { "$ref": "#/$defs/issue_number" },
+        "depends_on": { "$ref": "#/$defs/issue_number" },
+        "kind": {
+          "enum": ["explicit", "inferred", "override"],
+          "description": "explicit: stated in the issue body. inferred: a consumer of a shared contract, from the heuristic. override: supplied by the caller."
+        },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "note_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "detail"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "detail": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

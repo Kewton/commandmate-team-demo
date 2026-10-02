@@ -1,0 +1,280 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Kewton/commandmate-skills/blob/main/skills/cmate-orchestrate/schemas/observe-report.v1.json",
+  "title": "cmate-orchestrate observe report v1",
+  "description": "Report printed to stdout and written to observe-report.json by the post-merge observation runner (scripts/observe.mjs, Issue #221). Closed schema: an unknown field is a contract violation, not something a reader may ignore. It records measurements taken on the BASE BRANCH AFTER a merge — the ones no worktree can take — and it DOES NOT ADJUDICATE. There is no verdict field, no threshold and no acceptance vocabulary anywhere in this document: `status` reports how much of the requested collection actually happened, and the words `pass` and `fail` appear nowhere except inside a GitHub `conclusion`, which is transcribed verbatim and always sits under a key of that name. Three measured failures shaped it (Kewton/CommandMate#1835): the runs right after a merge are outliers, so every sample is listed and never only a median; a run's wall clock carries setup noise the criterion is not about, so a step can be measured on its own; and a defect appeared on the fifth run of five, so how many samples a number rests on is recorded next to it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "observe_schema_version",
+    "skill_id",
+    "skill_version",
+    "status",
+    "runs_requested",
+    "max_wait_sec",
+    "plan_run_id",
+    "out_dir",
+    "repository",
+    "base",
+    "observations_source",
+    "observations_declared",
+    "issues",
+    "comment",
+    "artifacts",
+    "errors",
+    "limitations",
+    "redactions",
+    "completion_check",
+    "summary_markdown"
+  ],
+  "properties": {
+    "observe_schema_version": { "const": 1 },
+    "skill_id": { "const": "cmate-orchestrate" },
+    "skill_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "status": {
+      "enum": ["success", "partial", "refused"],
+      "description": "COMPLETENESS OF COLLECTION, and nothing else. success: every observation of every merged issue got the runs_requested samples that were asked for. partial: something was short, unobservable, or a requested comment did not land — the values that WERE collected are still in the report. refused: the invocation was not accepted and nothing was observed at all (issues is null). This enum deliberately carries no acceptance vocabulary: whether the numbers meet the issue's criterion is a reading a human makes, and five people reading one series can reach different conclusions (the measured case where four runs said the opposite of five)."
+    },
+    "runs_requested": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "The --runs value. Never defaulted by the runner: 3 runs and 8 runs of one workflow gave opposite answers about the same change, so the number is a decision the operator makes and this field records. 0 only in a refusal envelope."
+    },
+    "max_wait_sec": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "The --max-wait budget in seconds. On reaching it the runner publishes what it has with status partial and an observation_incomplete limitation naming the shortfall; it never fills the gap in."
+    },
+    "plan_run_id": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/run_id" }] },
+    "out_dir": {
+      "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }],
+      "description": "Directory the observation artifacts were written to, REDACTED \u2014 unlike merge-report's out_dir, which is stored as given. This is the one report in the package designed to be published (--comment), so a host path that names somebody's home directory does not sit a byte away from a GitHub comment. The real directory is printed on stderr."
+    },
+    "repository": { "type": "string", "minLength": 1 },
+    "base": { "type": "string", "minLength": 1 },
+    "observations_source": {
+      "oneOf": [{ "type": "null" }, { "enum": ["plan", "profile_file"] }],
+      "description": "WHERE the declaration came from, stated rather than inferred. plan: plan.profile.observations, the default and the same handoff dispatch_defaults and integration_baseline use — what runs is what the approved plan froze. profile_file: --profile named a profile on disk, which is the documented escape for a plan frozen before the profile declared observations (re-planning would derive a new run id, and the wave being observed has already merged). The second always raises the observations_from_profile_file limitation, because the two sources can differ."
+    },
+    "observations_declared": {
+      "type": "array",
+      "description": "The declarations that were collected, transcribed in profile order.",
+      "items": { "$ref": "#/$defs/declaration" }
+    },
+    "issues": {
+      "oneOf": [{ "type": "null" }, { "type": "array", "items": { "$ref": "#/$defs/issue" } }],
+      "description": "One entry per merged target of the merge report, in merge order. null whenever the run refused its input — stated as data so a consumer cannot read 'we could not look' as 'we looked and there was nothing', the same distinction inspect.mjs's null inspection carries."
+    },
+    "comment": { "$ref": "#/$defs/comment" },
+    "artifacts": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "errors": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
+    "limitations": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
+    "redactions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "count"],
+        "properties": {
+          "kind": { "type": "string", "minLength": 1 },
+          "count": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "completion_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["satisfied", "checks"],
+      "description": "The runner's self-report on its own discipline. The member is `satisfied`, not `passed`: nothing in this document adjudicates, and a field named after a verdict is how a verdict gets read into one.",
+      "properties": {
+        "satisfied": { "type": "boolean" },
+        "checks": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "satisfied", "detail"],
+            "properties": {
+              "id": {
+                "enum": [
+                  "no_adjudication",
+                  "every_sample_listed",
+                  "exclusions_counted",
+                  "merge_facts_from_github",
+                  "writes_only_when_approved"
+                ]
+              },
+              "satisfied": { "type": "boolean" },
+              "detail": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "summary_markdown": {
+      "type": "string",
+      "minLength": 1,
+      "description": "One table row per SAMPLE, never a median on its own. That is the whole point of the document: the retracted report this runner exists to prevent was a median read without the series under it. Under --comment --approve these are the exact bytes posted as an issue comment, which is why the summary is rendered before the comment is sent and never re-rendered after."
+    }
+  },
+  "$defs": {
+    "run_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+    "issue_number": { "type": "integer", "minimum": 1 },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "detail"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "detail": { "type": "string", "minLength": 1 }
+      }
+    },
+    "observation_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+    "declaration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "unit"],
+      "description": "A declaration as lib.mjs normalizeObservations rebuilt it: id, kind, the kind's own keys, then unit. The kind's keys are validated at load time, so a declaration that reaches this report is one whose required keys are present.",
+      "properties": {
+        "id": { "$ref": "#/$defs/observation_id" },
+        "kind": { "enum": ["gh_run", "gh_job_step", "command"] },
+        "workflow": { "type": "string", "minLength": 1 },
+        "job": { "type": "string", "minLength": 1 },
+        "step": { "type": "string", "minLength": 1 },
+        "command": { "type": "string", "minLength": 1 },
+        "unit": { "type": "string", "minLength": 1 }
+      }
+    },
+    "issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issue", "pr_number", "merged_at", "merge_commit", "observable", "note", "observations"],
+      "properties": {
+        "issue": { "$ref": "#/$defs/issue_number" },
+        "pr_number": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/issue_number" }] },
+        "merged_at": {
+          "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }],
+          "description": "The instant the PR merged, read with `gh pr view <n> --json mergedAt,mergeCommit`. It is NOT in merge-report.v1 and never was — that report carries pr_number and merged: bool — so it is fetched here and written down here: an observation window whose start nobody recorded is an observation nobody can re-check. It is never approximated from the merge report's own timestamps; a window with an invented start attributes runs to a merge that did not cause them."
+        },
+        "merge_commit": {
+          "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }],
+          "description": "The merge commit oid from the same call. kind: command checks this exact commit out into a throwaway detached worktree, so the number it prints describes the state immediately after this issue landed rather than the branch tip at some later moment."
+        },
+        "observable": {
+          "type": "boolean",
+          "description": "False means the merge instant could not be read, so no window could be opened and NOTHING was collected for this issue (observations is empty and note says why, with a matching not_observable limitation). It is never rounded into an issue whose observations happened to be empty."
+        },
+        "note": { "type": "string" },
+        "observations": { "type": "array", "items": { "$ref": "#/$defs/observation" } }
+      }
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "unit",
+        "requested",
+        "collected",
+        "counted",
+        "complete",
+        "samples",
+        "excluded",
+        "median",
+        "mean",
+        "baseline",
+        "baseline_source",
+        "note"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/observation_id" },
+        "kind": { "enum": ["gh_run", "gh_job_step", "command"] },
+        "unit": { "type": "string", "minLength": 1 },
+        "requested": { "type": "integer", "minimum": 0 },
+        "collected": { "type": "integer", "minimum": 0, "description": "How many samples were found at all. Equals samples.length." },
+        "counted": { "type": "integer", "minimum": 0, "description": "How many of them entered median and mean. collected minus counted is always accounted for in excluded." },
+        "complete": { "type": "boolean", "description": "collected === requested. False is what makes the run partial, and it is stated rather than filled in." },
+        "samples": {
+          "type": "array",
+          "description": "EVERY sample, in the order it was observed (oldest run first), excluded ones included. A median without its series is the shape of the retracted report this runner replaces.",
+          "items": { "$ref": "#/$defs/sample" }
+        },
+        "excluded": {
+          "type": "array",
+          "description": "The samples that did NOT enter the aggregate, tallied by why, in order of first appearance. A cancelled, unfinished or non-green run did not measure the thing, so it is left out of median and mean — but never left out silently.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["conclusion", "count"],
+            "properties": {
+              "conclusion": { "$ref": "#/$defs/conclusion" },
+              "count": { "type": "integer", "minimum": 1 }
+            }
+          }
+        },
+        "median": { "oneOf": [{ "type": "null" }, { "type": "number" }] },
+        "mean": { "oneOf": [{ "type": "null" }, { "type": "number" }] },
+        "baseline": {
+          "oneOf": [{ "type": "null" }, { "type": "number" }],
+          "description": "The 'before' value, looked up by id in whatever document --inspect names. null means no --inspect was given, or that document holds no numeric value under this id — a fact about the artifact, not a defect in it. No producer's format is assumed: the rule is the first object a breadth-first walk of the document reaches that has this id and a finite number under value (preferred) or median."
+        },
+        "baseline_source": {
+          "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }],
+          "description": "Where in the --inspect document that number was found, as a slash path, so the match can be checked rather than trusted."
+        },
+        "note": { "type": "string" }
+      }
+    },
+    "sample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_id", "url", "conclusion", "value", "counted", "note"],
+      "properties": {
+        "run_id": {
+          "oneOf": [{ "type": "null" }, { "type": "integer" }],
+          "description": "The GitHub Actions run id. null for kind: command, which has no run."
+        },
+        "url": { "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }] },
+        "conclusion": { "$ref": "#/$defs/conclusion" },
+        "value": {
+          "oneOf": [{ "type": "null" }, { "type": "number" }],
+          "description": "The measurement, in the observation's unit. null exactly when the sample was not counted."
+        },
+        "counted": { "type": "boolean", "description": "Whether this sample entered median and mean." },
+        "note": { "type": "string" }
+      }
+    },
+    "conclusion": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The GitHub conclusion of the run or step, TRANSCRIBED VERBATIM — this is the only vocabulary in the whole document that is not this runner's own, which is why it always sits under a key of this name. Three values are the runner's instead, for facts GitHub has no word for: in_progress (the run or step has not concluded), and, for kind: command, ok / no_number_on_stdout / command_unavailable / jobs_unavailable / job_not_found / step_not_found."
+    },
+    "comment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requested", "approved", "written"],
+      "description": "The only write this runner has (Issue #221), and the first path in this package that writes to GitHub at all: `gh issue comment`. --comment requires --approve, and the refusal happens before any input is read, so a mistyped invocation cannot post anything on its way to being rejected. It posts a COMMENT and never edits an issue body — SKILL.md section 1 puts automatic body editing out of scope and this does not move that line.",
+      "properties": {
+        "requested": { "type": "boolean" },
+        "approved": { "type": "boolean" },
+        "written": {
+          "type": "array",
+          "description": "One entry per issue a comment was attempted on. Empty on every run that did not pass both flags, which is what 'nothing was written to GitHub' looks like.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["issue", "ok", "note"],
+            "properties": {
+              "issue": { "$ref": "#/$defs/issue_number" },
+              "ok": { "type": "boolean" },
+              "note": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

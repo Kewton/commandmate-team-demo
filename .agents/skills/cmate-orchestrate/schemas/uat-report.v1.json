@@ -1,0 +1,441 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Kewton/commandmate-skills/blob/main/skills/cmate-orchestrate/schemas/uat-report.v1.json",
+  "title": "cmate-orchestrate UAT report v1",
+  "description": "Report printed to stdout and written to uat-report.json by the cmate-orchestrate UAT runner (scripts/uat.mjs). Closed schema: an unknown field is a contract violation, not something a reader may ignore. It records one UAT phase over the verification-passed issues of an already-delivered plan: either a read-only acceptance assessment (write_uat) or a bounded fix loop (fix_uat) that, when UAT fails, creates fix worktrees, dispatches a fix, re-verifies and re-merges, and repeats up to a fixed attempt cap. Reaching the cap with issues still failing is reported as blocked — never rounded up to success. Each attempt is appended to the history; a prior attempt is never overwritten. Since 0.8.0 (#1616) adjudication is two-layered: a machine gate (the profile baseline) and a semantic gate (a cmate-acceptance-test acceptance-result.v1 document, read and validated but never produced here) compose into a per-issue verdict. That extension is additive — every field it introduced is optional, so a report written before it still conforms.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "uat_schema_version",
+    "skill_id",
+    "skill_version",
+    "phase",
+    "status",
+    "stop_reason",
+    "approved",
+    "mutated",
+    "plan_run_id",
+    "out_dir",
+    "max_attempts",
+    "attempts_used",
+    "profile",
+    "eligible_issues",
+    "preflight",
+    "attempts",
+    "unresolved_issues",
+    "blocking_reasons",
+    "limitations",
+    "redactions",
+    "next_actions",
+    "completion_check",
+    "summary_markdown"
+  ],
+  "properties": {
+    "uat_schema_version": { "const": 1 },
+    "skill_id": { "const": "cmate-orchestrate" },
+    "skill_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "phase": {
+      "enum": ["write_uat", "fix_uat"],
+      "description": "The single phase this invocation enabled. write_uat runs the acceptance assessment once and writes the report (read-only). fix_uat runs the bounded fix loop (mutating when approved). Exactly one is ever enabled."
+    },
+    "status": {
+      "enum": ["success", "partial", "blocked", "failure"],
+      "description": "success: UAT passed for every eligible issue (possibly after a fix). partial: UAT failed and the run stopped without exhausting the attempt cap (a preview, or a fix that could not be attempted). blocked: the attempt cap was reached with issues still failing UAT — an honest stop, not a failure. failure: nothing could be attempted (preflight failed, bad invocation)."
+    },
+    "stop_reason": {
+      "enum": [
+        "completed",
+        "uat_failed",
+        "acceptance_conditional",
+        "max_attempts_reached",
+        "worktree_failed",
+        "fix_failed",
+        "remerge_failed",
+        "preflight_failed",
+        "runner_error"
+      ],
+      "description": "Why the phase stopped. completed: every eligible issue passed UAT (possibly after a fix), or there was nothing eligible to do. acceptance_conditional: the machine gate passed but the acceptance gate returned conditional_go for at least one issue, so the run is held for a human decision instead of being rounded up (status partial). max_attempts_reached: the fix loop hit its cap with failures remaining (status blocked). The rest name the first blocking condition; a failure is never reported as completed."
+    },
+    "approved": {
+      "type": "boolean",
+      "description": "Whether --approve was given. When false the fix loop is a no-mutation preview: no fix worktree is created, no fix worker is dispatched, and nothing is re-merged."
+    },
+    "mutated": {
+      "type": "boolean",
+      "description": "Whether at least one mutating command (git worktree add, commandmate send, git merge) was actually invoked. Always false when approved is false, and always false for write_uat."
+    },
+    "plan_run_id": { "$ref": "#/$defs/run_id" },
+    "out_dir": {
+      "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }],
+      "description": "Directory the UAT artifacts were written to. Null when nothing was written."
+    },
+    "max_attempts": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 5,
+      "description": "The fixed upper bound on fix attempts. The loop never exceeds it; reaching it with failures remaining is blocked, not success."
+    },
+    "attempts_used": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "How many fix attempts were actually performed. Never greater than max_attempts. Always 0 for write_uat and for a preview."
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "repository", "base", "verified"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "repository": { "type": "string", "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$" },
+        "base": { "type": "string", "minLength": 1 },
+        "verified": { "type": "boolean" }
+      }
+    },
+    "eligible_issues": {
+      "type": "array",
+      "description": "Issues drawn from the dispatch report whose worker completed AND whose verification passed. Only these are ever subjected to UAT or repaired: an unverified issue is never fixed or re-merged.",
+      "items": { "$ref": "#/$defs/issue_number" }
+    },
+    "acceptance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["configured", "required", "issues_evaluated", "verdicts"],
+      "description": "Optional (added in 0.8.0, #1616): how the semantic gate was applied to this run. Absent in a report written before the gate existed, which is why it is not required. configured false means --acceptance-dir was not given and every issue was adjudicated on the baseline alone — the pre-0.8.0 behavior, stated rather than implied.",
+      "properties": {
+        "configured": {
+          "type": "boolean",
+          "description": "Whether --acceptance-dir was given. False means the semantic gate did not participate at all."
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Whether --require-acceptance was given, making a missing, non-conformant or wrong-issue acceptance result a failure instead of a recorded limitation."
+        },
+        "issues_evaluated": { "type": "integer", "minimum": 0 },
+        "verdicts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["go", "conditional_go", "no_go", "missing", "invalid", "mismatched", "not_configured"],
+          "description": "Counts over each issue's FINAL assessment. go/conditional_go/no_go are verdicts an acceptance document actually carried; missing/invalid/mismatched/not_configured are the named ways it did not.",
+          "properties": {
+            "go": { "type": "integer", "minimum": 0 },
+            "conditional_go": { "type": "integer", "minimum": 0 },
+            "no_go": { "type": "integer", "minimum": 0 },
+            "missing": { "type": "integer", "minimum": 0 },
+            "invalid": { "type": "integer", "minimum": 0 },
+            "mismatched": { "type": "integer", "minimum": 0 },
+            "not_configured": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "preflight": {
+      "type": "array",
+      "description": "Read-only preflight probes run before any mutation (commandmate availability, repo access, base resolvable). A blocking failure yields status failure and nothing is attempted.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "ok", "blocking", "detail"],
+        "properties": {
+          "code": { "enum": ["cli_available", "repo_access", "base_resolvable"] },
+          "ok": { "type": "boolean" },
+          "blocking": { "type": "boolean" },
+          "detail": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "attempts": {
+      "type": "array",
+      "description": "The append-only attempt history. Index 0 is the initial assessment; each later entry is one fix attempt followed by a re-assessment. A prior attempt is never overwritten. Every entry records the UAT outcome that opened it, the fix worktrees created, the fixes dispatched, and the re-merge.",
+      "items": { "$ref": "#/$defs/attempt" }
+    },
+    "unresolved_issues": {
+      "type": "array",
+      "description": "Issues whose composite verdict was FAIL when the run stopped. Non-empty whenever status is blocked (cap reached), and whenever partial was caused by a failing assessment (a preview or a fix that could not be attempted). An issue held for a human by a conditional_go acceptance verdict is not failing and is listed in conditional_issues instead, so a partial run may have this empty and that one non-empty.",
+      "items": { "$ref": "#/$defs/issue_number" }
+    },
+    "conditional_issues": {
+      "type": "array",
+      "description": "Optional (added in 0.8.0, #1616): issues whose machine gate passed but whose acceptance verdict was conditional_go. They are neither passed nor repaired — a conditional_go is a human decision, and the bounded fix loop never auto-answers one. Non-empty forces status away from success.",
+      "items": { "$ref": "#/$defs/issue_number" }
+    },
+    "blocking_reasons": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
+    "limitations": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
+    "redactions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "count"],
+        "properties": {
+          "kind": { "type": "string", "minLength": 1 },
+          "count": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "next_actions": {
+      "type": "array",
+      "description": "What to do next and who owns it. Always present; empty only on an unqualified success.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["action", "owner"],
+        "properties": {
+          "action": { "type": "string", "minLength": 1 },
+          "owner": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "completion_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passed", "checks"],
+      "properties": {
+        "passed": { "type": "boolean" },
+        "checks": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 6,
+          "description": "Five checks before 0.8.0; six since (#1616 added acceptance_not_rounded). The bound stays open at five so a report written by the earlier runner still conforms.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "passed", "detail"],
+            "properties": {
+              "id": {
+                "enum": [
+                  "single_phase",
+                  "approval_enforced",
+                  "attempts_bounded",
+                  "blocked_reported",
+                  "verification_gated",
+                  "acceptance_not_rounded"
+                ]
+              },
+              "passed": { "type": "boolean" },
+              "detail": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "summary_markdown": { "type": "string", "minLength": 1 }
+  },
+  "$defs": {
+    "run_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+    "issue_number": { "type": "integer", "minimum": 1 },
+    "git_sha_nullable": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+      ],
+      "description": "A resolved commit SHA, or null before one was resolved. A symbolic ref alone is never enough to record a base."
+    },
+    "worktree_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "description": "Repository-relative, or a single leading '../' for the sibling-worktree convention. No absolute path, no drive letter, no backslash, no control character. The dispatch path-escape guard additionally forbids any inner '..'; a value that fails it is never recorded here.",
+      "pattern": "^(?:\\.\\./)?[A-Za-z0-9._][A-Za-z0-9._/-]*$"
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "detail"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "detail": { "type": "string", "minLength": 1 }
+      }
+    },
+    "uat_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issue", "ran", "report_schema_version", "outcome", "scenarios", "note"],
+      "description": "One issue's adjudication. Since 0.8.0 (#1616) it carries both gates separately — `baseline` (machine) and `acceptance` (semantic) — plus the `verdict` they compose into. Those three are optional so a report written before the semantic gate existed still conforms; `outcome` remains required and remains the value an older reader consumes.",
+      "properties": {
+        "issue": { "$ref": "#/$defs/issue_number" },
+        "ran": { "type": "boolean" },
+        "report_schema_version": {
+          "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 1 }],
+          "description": "Version of the UAT report the acceptance run produced. Null when UAT did not run (a preview). An unknown version is treated as a fail, never a pass."
+        },
+        "outcome": {
+          "enum": ["pass", "fail", "not_run"],
+          "description": "Measured, never rounded. Since 0.8.0 this is the composite `verdict` projected onto the original tri-state: `pass` ONLY when the composite verdict is pass, so a reader that predates the acceptance gate can never mistake a conditional or failing issue for a passing one. A conditional verdict therefore appears here as fail — the exact value is in `verdict`. not_run only in a preview."
+        },
+        "verdict": {
+          "enum": ["pass", "conditional", "fail", "not_run"],
+          "description": "Optional (0.8.0, #1616). The composition of both gates. pass: the baseline passed and acceptance said go (or the semantic gate was not configured). conditional: the baseline passed and acceptance said conditional_go — held for a human, never rounded up. fail: the baseline failed, acceptance said no_go, or --require-acceptance was given and no usable acceptance result existed."
+        },
+        "verdict_source": {
+          "enum": [
+            "baseline",
+            "acceptance_go",
+            "acceptance_conditional_go",
+            "acceptance_no_go",
+            "baseline_only",
+            "baseline_only_degraded",
+            "acceptance_required"
+          ],
+          "description": "Optional (0.8.0, #1616). Which gate decided the verdict, so a reader never has to infer it. baseline: the machine gate failed. baseline_only: --acceptance-dir was not given. baseline_only_degraded: it was given but this issue had no usable result, so the verdict rests on the baseline alone and the run records the acceptance_not_run limitation. acceptance_required: the same situation under --require-acceptance, which fails instead."
+        },
+        "baseline": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["outcome", "checks", "note"],
+          "description": "Optional (0.8.0, #1616). The machine gate on its own, kept separate from the composition so replacing how it is measured (#1588 moves it to a contract verify exit code) does not disturb the semantic gate.",
+          "properties": {
+            "outcome": { "enum": ["pass", "fail", "not_run"] },
+            "checks": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "note": { "type": "string" }
+          }
+        },
+        "acceptance": { "$ref": "#/$defs/acceptance_result" },
+        "scenarios": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Redacted names of the acceptance scenarios that were checked. Never a raw terminal or a secret."
+        },
+        "note": { "type": "string" }
+      }
+    },
+    "acceptance_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "verdict", "status", "issue_ref", "verdict_reason", "findings", "conditions", "note"],
+      "description": "Optional (0.8.0, #1616). What the semantic gate contributed for one issue, read from an acceptance-result.v1 document written by cmate-acceptance-test or cmate-uat (0.33.0, #259). The UAT runner never produces a verdict — it validates the document, confirms it targets this issue, and records what it said and who said it.",
+      "properties": {
+        "state": {
+          "enum": ["not_configured", "missing", "invalid", "mismatched", "loaded"],
+          "description": "How far reading got. not_configured: --acceptance-dir was not given. missing: no issue-<n>.json under it. invalid: not JSON, or not conformant to acceptance-result.v1. mismatched: conformant but its target.issue_ref names a different issue. loaded: usable, and `verdict` below is what it said. Only `loaded` ever contributes a verdict — the other four are named so a degraded run is visible rather than silent."
+        },
+        "verdict": {
+          "oneOf": [{ "type": "null" }, { "enum": ["go", "conditional_go", "no_go"] }],
+          "description": "The acceptance document's verdict, verbatim. Null unless state is loaded."
+        },
+        "status": {
+          "oneOf": [{ "type": "null" }, { "enum": ["success", "partial", "failure"] }],
+          "description": "How far the acceptance run itself got, verbatim. Independent of verdict: a run that verified everything and found a failure is status success and verdict no_go."
+        },
+        "issue_ref": {
+          "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1, "maxLength": 200 }],
+          "description": "The document's target.issue_ref, redacted. Recorded for a loaded or mismatched document so a wrong-target result can be diagnosed."
+        },
+        "verdict_reason": { "type": "string", "maxLength": 300 },
+        "producer": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "version"],
+              "properties": {
+                "id": { "enum": ["cmate-acceptance-test", "cmate-uat"] },
+                "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" }
+              }
+            }
+          ],
+          "description": "OPTIONAL, and absent — not null — in a report written by a runner before 0.33.0, which is why it is not required: making it required would retroactively invalidate every v1 report already on disk, and the schema version is still 1. Present from 0.33.0 (#259): who produced the verdict. The id set is an allowlist, not a hint — a skill.id outside it makes the document invalid, so a producer recorded here is one the runner accepted. Null for every state but loaded: a missing document has no producer, and an invalid one has no producer the runner will vouch for (an unknown skill.id is exactly what failed to conform). Recorded rather than branched on — the composition rules never read it, because which producer judged an issue does not change how its verdict composes. The fix prompt names it in the acceptance heading, so a worker is never told a Skill produced a verdict it did not."
+        },
+        "findings": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Bounded, redacted excerpts of the criteria that resolved to fail plus the run's blocking reasons — what a fix worker has to repair. Quoted into the fix prompt so a repair targets the actual finding instead of guessing."
+        },
+        "conditions": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Bounded, redacted excerpts of the criteria that never resolved (flaky, blocked, not_run, manual_pending, not_verifiable) plus the run's next actions and limitations — what a human has to close before a conditional_go can become an acceptance."
+        },
+        "note": { "type": "string" }
+      }
+    },
+    "worktree_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issue", "branch", "directory", "base_sha", "created", "reused", "note"],
+      "description": "One fix worktree, in the shape of the cmate-worktree-setup worktree-result (#1448): the branch is created from a re-confirmed base SHA, an existing worktree is never implicitly overwritten, and no absolute path is recorded.",
+      "properties": {
+        "issue": { "$ref": "#/$defs/issue_number" },
+        "branch": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "directory": { "$ref": "#/$defs/worktree_path" },
+        "base_sha": { "$ref": "#/$defs/git_sha_nullable" },
+        "created": { "type": "boolean" },
+        "reused": {
+          "type": "boolean",
+          "description": "Always false here: a fix worktree is created fresh per attempt. created and reused are never both true."
+        },
+        "note": { "type": "string" }
+      }
+    },
+    "fix_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issue", "task_id", "dispatched", "worker_state", "verification", "note"],
+      "properties": {
+        "issue": { "$ref": "#/$defs/issue_number" },
+        "task_id": { "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }] },
+        "dispatched": { "type": "boolean" },
+        "worker_state": {
+          "enum": ["completed", "failed", "timeout", "prompt", "not_dispatched"],
+          "description": "completed is worker completion only; the re-verification below is a separate gate."
+        },
+        "verification": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ran", "report_schema_version", "outcome", "checks"],
+          "properties": {
+            "ran": { "type": "boolean" },
+            "report_schema_version": { "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 1 }] },
+            "outcome": { "enum": ["pass", "fail", "not_run"] },
+            "checks": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+          }
+        },
+        "note": { "type": "string" }
+      }
+    },
+    "remerge_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attempted_issues", "merged_issues", "outcome", "note"],
+      "properties": {
+        "attempted_issues": { "type": "array", "items": { "$ref": "#/$defs/issue_number" } },
+        "merged_issues": { "type": "array", "items": { "$ref": "#/$defs/issue_number" } },
+        "outcome": {
+          "enum": ["merged", "conflict", "skipped", "not_attempted"],
+          "description": "merged: every fix branch re-merged cleanly. conflict: a re-merge hit a conflict and the loop stopped. skipped: nothing re-merged because no fix re-verified. not_attempted: a preview, or the phase stopped before re-merge."
+        },
+        "note": { "type": "string" }
+      }
+    },
+    "attempt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index", "kind", "fix_performed", "uat_results", "failing_issues", "worktrees", "fixes", "remerge", "advanced"],
+      "properties": {
+        "index": { "type": "integer", "minimum": 0 },
+        "kind": {
+          "enum": ["assess", "fix"],
+          "description": "assess: this attempt only ran UAT (index 0, a preview, or the terminal assessment that reached the cap). fix: this attempt ran UAT and then performed a fix."
+        },
+        "fix_performed": {
+          "type": "boolean",
+          "description": "Whether this attempt created worktrees, dispatched fixes and re-merged. True only under --approve and only when UAT failed with attempt budget remaining."
+        },
+        "uat_results": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/uat_result" }
+        },
+        "failing_issues": { "type": "array", "items": { "$ref": "#/$defs/issue_number" } },
+        "worktrees": { "type": "array", "items": { "$ref": "#/$defs/worktree_result" } },
+        "fixes": { "type": "array", "items": { "$ref": "#/$defs/fix_result" } },
+        "remerge": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/remerge_result" }] },
+        "advanced": {
+          "type": "boolean",
+          "description": "True when this attempt's UAT passed for every target, so no further fix was needed."
+        }
+      }
+    }
+  }
+}

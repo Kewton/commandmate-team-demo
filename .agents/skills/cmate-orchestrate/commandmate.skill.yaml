@@ -1,0 +1,318 @@
+schema_version: 1
+id: cmate-orchestrate
+name: cmate-orchestrate
+version: 0.37.0
+summary: 複数 Issue の並列実行を dry-run で計画し、承認後に実行契約付きで dispatch して検証 exit code で裁定し、pass 後は承認と CI の 2 gate で PR 作成・guarded merge、納品後は UAT と回数上限つき修正ループを回す。UAT の意味ゲートには cmate-acceptance-test の別途 install が要る。
+description: >-
+  複数 Issue を並列で進めるための、計画（dry-run）・その承認後の監督付き実行・verification pass 後の
+  納品（PR 作成・CI 確認・guarded merge）・納品後の受入（UAT と回数上限つき修正ループ）を行う標準
+  手順である。同梱の deterministic planner（Node stdlib のみ）が、各 Issue の objective・受入条件・対象
+  file・blocking question を分析し、explicit と inferred の依存を区別し、cycle・不完全 override・依存順
+  違反を拒否し、file 衝突のある Issue を同一 Wave に置かない Wave plan と merge 順、risk、要求権限、実行
+  command を生成する。同じ入力からは同じ plan が出る（Claude/Codex parity）。run artifact は unique run
+  ID 配下に生成し、既存 run を上書きしない。承認後は同梱の dispatch runner が、その plan を入力に取り、
+  plan から実行契約 yaml（goal・scope.allow）を決定的に生成して worktree に配置し、public commandmate の
+  send --contract で dispatch して返る task id を記録し、mutation 前に drift（branch/HEAD/permission）を
+  再確認し、裁定は wait --verify の exit code を一次ソースにする（0 合格 / 20 判定して不合格は失敗ゲートを
+  特定して再指示 / 21 作業証跡ゼロ / 10 prompt は自動応答せず human 提示 / 99 判定に到達せずは再指示せず
+  human へ）。実行冒頭で契約対応を確認し、非対応なら明示メッセージつきで profile baseline 再実行の
+  フォールバックに落ちるか停止するかを選ぶ（黙って劣化しない）。前 Wave の全 worker 完了と verification
+  pass を次 Wave dispatch の条件とし、worker completion と verification success は別々に判定する
+  （Auto Yes は既定 off）。納品は同梱の merge runner が、
+  dispatch report で verification pass した Issue だけを対象に、CommandAgent の explicit phase flag 設計
+  （--create-prs / --merge-prs）を踏襲して 1 invocation で 1 mutating phase だけを有効化し、明示承認
+  （--approve）無しに push・PR 作成・merge をせず、CI pass 無しに merge しない。受入は同梱の uat runner
+  が、同じ verification-passed 集合に UAT を実行し（--write-uat）、不合格なら CommandAgent の
+  --create-uat-fix-worktrees 相当の phase で fix worktree 作成（#1448 worktree-result 整合）→修正→
+  再検証→再merge を --max-attempts の回数上限つきで繰り返し、上限到達でなお不合格なら blocked として
+  停止して成功に丸めない。PR 作成失敗・CI failure・merge conflict・UAT 失敗は blocked/partial として停止
+  し、attempt 履歴は既存 run artifact を上書きせず append する。base branch・branch 名・worktree path・
+  baseline は profile から解決し hardcode しない。Issue 本文編集・回数無制限ループ・crash 後の resume は
+  行わない。planner の default invocation は dry-run である。
+  UAT の意味ゲートは cmate-acceptance-test の result document を入力に取る。この Skill は本 package の
+  install には含まれないため別途 install が要り、未導入なら機械ゲートのみで裁定してその旨を limitations
+  に記録する。
+capabilities:
+  - GitHub Issue の objective・受入条件・suspected/reference file・blocking question を分析する
+  - explicit（本文由来）と inferred（推論）の依存を区別して解決する
+  - cycle・不完全 override・依存順違反を安全に検出して拒否する
+  - file 衝突のある Issue を同一 Wave に置かない bounded な Wave plan を生成する
+  - 同一入力から決定的な plan・run_id を返し、既存 run を上書きしない
+  - 承認済み plan から決定的な実行契約を生成し、commandmate の検証 exit code（0/20/21/10/99）で裁定して Wave barrier と verification gate で監督する
+  - 契約対応の有無を実行冒頭で確認し、非対応なら明示メッセージつきでフォールバックするか停止する（黙って劣化しない）
+  - verification pass した Issue を、明示承認と CI pass の 2 gate の下で 1 invocation 1 phase で PR 作成・guarded merge する
+  - 納品後の UAT 不合格を、fix worktree→修正→再検証→再merge の回数上限つき修正ループで修復し、上限到達時は blocked として停止する
+  - PR/CI/merge/UAT の失敗を success に丸めず blocked/partial として記録し、attempt 履歴を上書きせず append する
+expected_outcomes:
+  - 承認前に、依存と file 衝突を踏まえた並列実行計画が file/Wave 単位で確認できる
+  - 危険な依存グラフ（cycle・不完全 override）が計画段階で止まる
+  - 同じ入力を別 Agent で回しても同じ plan が再現でき、突き合わせられる
+  - 承認済み plan を監督付きで段階実行でき、Wave barrier と verification gate で安全に進む
+  - prompt は自動応答されず human 判断に委ねられ、判定に到達しなかった検証（exit 99）も不合格に丸めず human へ上がる
+  - verification pass した Issue が、明示承認と CI pass の 2 gate の下でのみ PR 作成・merge される
+  - PR 作成失敗・CI failure・merge conflict が success に丸められず、blocked/partial として記録される
+  - 納品後の UAT 不合格が、回数上限つきの修正ループ（fix worktree→修正→再検証→再merge）で自動修復を試みられる
+  - 修正ループが上限で停止したことが blocked として明示され、未解決 Issue と next action が後から検証できる
+  - 「この run は今どの phase で、どの Issue が何待ちか」が、複数の JSON を突き合わせずに1つの表で読める
+provider:
+  name: CommandMate
+  url: https://github.com/Kewton/CommandMate
+license: MIT
+homepage: https://github.com/Kewton/commandmate-skills
+keywords:
+  - orchestration
+  - planning
+  - dry-run
+  - dependency
+  - wave
+  - parallel
+  - issue
+compatibility:
+  commandmate: '>=0.11.0 <1.0.0'
+  agents:
+    - agent: claude
+      support: native
+      evidence: Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.
+    - agent: codex
+      support: native
+      evidence: Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. Same deterministic runner, same plan (parity).
+    - agent: gemini
+      support: unknown
+      evidence: Not verified for this version. Readable as a procedure, discovery and reload unverified.
+    - agent: opencode
+      support: native
+      evidence: 'Measured 2026-08-25 on opencode 1.18.22 (CommandMate#2037) and re-checked 2026-09-04 on 1.18.27: GET /skill lists SKILL.md from .agents/skills and .claude/skills; submitting /<name> loads the skill. Scanned at boot, restart after install. Not in opencode''s own slash palette.'
+    - agent: command-code
+      support: native
+      evidence: 'Measured 2026-09-04 on Command Code 1.47.0 (CommandMate#2322): discovered from .agents/skills (cmd skills list, /skills picker); /<name> emits skill_loaded and runs. .claude/skills is not read; the installer''s .agents/skills copy suffices. No restart needed.'
+    - agent: opencode-v2
+      support: native
+      evidence: 'Measured 2026-09-29 on opencode2 2.0.18 (CommandMate#2975): GET /api/skill lists SKILL.md from .agents/skills and .claude/skills; /<name> makes the model call the skill tool. No restart needed. Not in v2''s / palette (@ and /skills only). This package was NOT separately measured.'
+requirements:
+  commands:
+    - name: commandmate
+    - name: git
+    - name: gh
+    - name: node
+      version_range: '>=22.0.0'
+  network_hosts:
+    - api.github.com
+    - github.com
+declared_permissions:
+  - filesystem_read
+  - filesystem_write
+  - process_execution
+  - network_access
+declared_risk: high
+risk_rationale: >-
+  Ships executable runners (high risk). The planner only reads issues and writes a
+  dry-run plan. The dispatch runner mutates via commandmate: it places an execution
+  contract in each worktree and dispatches it, guarded by a drift re-check, a wave
+  barrier, the contract's verdict and halted prompts. The merge runner opens PRs and
+  merges verified issues only, never without approval and green CI. The UAT runner
+  repairs failures within a fixed cap, stopping as blocked. Secrets are redacted.
+files:
+  - path: SKILL.md
+    sha256: c79122378ab63eda5dc5ef8a908fccf82197d97a2c7b839d50bee162370ca048
+    size: 59982
+    kind: skill_md
+    executable: false
+    script: false
+  - path: references/acceptance-gates-notation.md
+    sha256: 183e9ef66b7349b94752440f9337d51e49d697c4bf7a2aef904c1d6bc691df82
+    size: 25856
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/adr-issue-acceptance-gates.md
+    sha256: 85b09f6e5ef83ae4fb4e80ea8ec2ffe3964ee4451266c3efcaae29853c625018
+    size: 57527
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/adr-scope-derivation.md
+    sha256: f6a57febf576c60c64e95c1942b67bb05d5ad90b595d648c4d05c892bcb36a95
+    size: 85186
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/adr-unattended-mode.md
+    sha256: 580126196ef2954caee98737564c221245a118aa867f639a0934ae553a0aa917
+    size: 118319
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/adr-worker-development-skill.md
+    sha256: ecc643a470de3e3291ca09977e51e97cc69b5db92384d9d62a2cfb63b2b8ef27
+    size: 68703
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/adr-worktree-preparation.md
+    sha256: d2679f3d399d400eebddd047e660a9e609e4f6ff53f8c914c5e275d0d3f3df82
+    size: 18657
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/agent-compatibility.md
+    sha256: d67db3ffbd98003cb0c0240926d0f238adb34a47f77660f8025801654dbcc4bf
+    size: 3166
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/codes-and-recovery.md
+    sha256: 1955f8eb67511f9923dca70cda217efaff7ce162f437ae6c6d7828ca0ee6092e
+    size: 111303
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/dispatch-contract.md
+    sha256: 9082e456d80654fea84693fd20d519a5d4a757bbf0631b0ea4064359dfdd3995
+    size: 172302
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/merge-contract.md
+    sha256: 9b891b022bc7996b0f84936b17ee0a428dc1efbd24f063a08a5bef21e1bea48a
+    size: 54981
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/observe-contract.md
+    sha256: 57bc2eaa985c67947e456976715fe108594c4d47481aab93fac10e085b0de483
+    size: 19330
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/open-questions-notation.md
+    sha256: 42ca72f7c0980ab1c47d01911f6e579d87c4cf39d62a1a5f009dbd9e4b3b17de
+    size: 9597
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/plan-contract.md
+    sha256: b9ba7e77250bf1cbc3c86b7af53ada72c481012fe3068283bdd3589e42d791c4
+    size: 79418
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/profile-contract.md
+    sha256: f2f1dfbecfacac89f38567cb41383daa2a77f7d3348e143e4f491d58c8be9e59
+    size: 66584
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/release-notes.md
+    sha256: df668adfeb252874ca55e782289f19733129fc60eca52487b4274661122f8c55
+    size: 269813
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/runner-operations.md
+    sha256: ede962d8cf2aba0e76a95d1177a7c5be7b866294b257b6a3a10d45e71bfe82d5
+    size: 54367
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/uat-contract.md
+    sha256: 89d005b7405ee6abc54507b4e3d6e5eacf058c4d108f9a70cab50286e599edb2
+    size: 31536
+    kind: instruction
+    executable: false
+    script: false
+  - path: schemas/dispatch-report.v1.json
+    sha256: ef58a9f956895a71f15b3e5a8cf5dc83b6877be34389ae7a8ff6b618e8bedbbb
+    size: 32872
+    kind: asset
+    executable: false
+    script: false
+  - path: schemas/execution-plan.v1.json
+    sha256: ab9f385f28e0b19122170482ed3554542683f69577b9d8ca3c43a04e1b81fa48
+    size: 10104
+    kind: asset
+    executable: false
+    script: false
+  - path: schemas/execution-plan.v2.json
+    sha256: 282cae972afecadf0371d856c308847c5a259f572b6ee04113348918a8119773
+    size: 35503
+    kind: asset
+    executable: false
+    script: false
+  - path: schemas/merge-report.v1.json
+    sha256: a6f23ebaccd096503b385bfb4887853b5802224fc7710bba19774436e36519db
+    size: 19202
+    kind: asset
+    executable: false
+    script: false
+  - path: schemas/observe-report.v1.json
+    sha256: 3f819ae20f8a23efba1e528749dc3d3bec337103d1749eab1970ecede69f5f5f
+    size: 16423
+    kind: asset
+    executable: false
+    script: false
+  - path: schemas/orchestrate-result.v1.json
+    sha256: c2e8a65068f9a74033a0e5e63aa96c9d265033d476444d4b72bcd3b1bb1f30c8
+    size: 3403
+    kind: asset
+    executable: false
+    script: false
+  - path: schemas/uat-report.v1.json
+    sha256: dac2f3c197f26f3bb28a02a1bf0f43a6c55e67a25dac00e65e06da66c167c7e4
+    size: 25063
+    kind: asset
+    executable: false
+    script: false
+  - path: scripts/dispatch.mjs
+    sha256: 74073da1357deda19a817d2360b36e5be155eaab10f1d82d580a9d97296284d7
+    size: 501596
+    kind: script
+    executable: true
+    script: true
+  - path: scripts/inspect.mjs
+    sha256: e3a068b29ef60a4fcff8d4ca84fd850111b77339edf70a7e0613e9d1e49a88ad
+    size: 64647
+    kind: script
+    executable: true
+    script: true
+  - path: scripts/lib.mjs
+    sha256: d7cabc5f3a6c77e87ec380b98dc0722bae664893c6da16c863f0983e3f9920fb
+    size: 77707
+    kind: script
+    executable: false
+    script: true
+  - path: scripts/merge.mjs
+    sha256: 5ee48b97c7f864a5260784f94e3c37d2c152437a9f55b1c6105ee3611eff6d32
+    size: 120487
+    kind: script
+    executable: true
+    script: true
+  - path: scripts/observe.mjs
+    sha256: f9e7b700a65d099595bf2c93750b9893d7af5532d1c1387e7fa8a910aceb1539
+    size: 52319
+    kind: script
+    executable: true
+    script: true
+  - path: scripts/orchestrate.mjs
+    sha256: 1b5508be3dfe017ece6e826ce8abf5542d07afebe509007d8148d98722706a02
+    size: 221281
+    kind: script
+    executable: true
+    script: true
+  - path: scripts/profile-init.mjs
+    sha256: 1caf32ff58b3d6a8beac5360713052af33d2ae269b5eec82528e681ad154c347
+    size: 84756
+    kind: script
+    executable: true
+    script: true
+  - path: scripts/status.mjs
+    sha256: 14f11b3ea8867a6ab0c397a5bbc11a2404613dc6543770456acef0b5f2bad1fd
+    size: 75056
+    kind: script
+    executable: true
+    script: true
+  - path: scripts/uat.mjs
+    sha256: b59f3eb96e566d1b25b23c035cc1f3a53d308719bec9d9b3080a2dbb71c060b9
+    size: 92463
+    kind: script
+    executable: true
+    script: true

@@ -1,0 +1,409 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Kewton/commandmate-skills/blob/main/skills/cmate-orchestrate/schemas/dispatch-report.v1.json",
+  "title": "cmate-orchestrate dispatch report v1",
+  "description": "Report printed to stdout and written to dispatch-report.json by the cmate-orchestrate dispatch runner. Closed schema: an unknown field is a contract violation, not something a reader may ignore. It records the supervised execution of an already-approved plan: per-wave dispatch, worker supervision, the wave barrier, and the verification gate. Worker completion and verification success are reported as separate facts and are never conflated. Since Skill 0.9.0 the verification verdict may come either from CommandMate's execution contract (`commandmate wait --verify`'s exit code) or from the profile-baseline fallback; the field set and the meaning of every enum value are identical in both modes, so a reader (the merge and UAT runners) needs no change. Which mode ran is stated in limitations/blocking_reasons and in summary_markdown. Since Issue #183 the run may also be scheduled by dependency satisfaction rather than by wave (`--schedule dag`, opt-in); the field set is identical in both, and the optional `schedule` field is what says which reading waves[] and max_parallel take.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "dispatch_schema_version",
+    "skill_id",
+    "skill_version",
+    "status",
+    "stop_reason",
+    "human_required",
+    "plan_run_id",
+    "out_dir",
+    "auto_yes",
+    "max_parallel",
+    "profile",
+    "drift_checks",
+    "waves",
+    "blocking_reasons",
+    "limitations",
+    "redactions",
+    "completion_check",
+    "summary_markdown"
+  ],
+  "properties": {
+    "dispatch_schema_version": { "const": 1 },
+    "skill_id": { "const": "cmate-orchestrate" },
+    "skill_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "status": {
+      "enum": ["success", "partial", "failure"],
+      "description": "success: every wave dispatched, every worker completed, every verification passed. partial: some progress but the loop stopped early (worker failure, timeout, verification failure, a prompt awaiting a human, or drift). failure: nothing was dispatched."
+    },
+    "stop_reason": {
+      "enum": [
+        "completed",
+        "human_required",
+        "worker_failed",
+        "verification_failed",
+        "timeout",
+        "drift",
+        "dispatch_error"
+      ],
+      "description": "Why the loop stopped. completed: all waves finished and passed. human_required: a worker raised a prompt and the loop halted without auto-responding. dispatch_error also covers the pre-dispatch and version-gate/verdict stops: open_questions (an issue in the plan still carries an unanswered planner question and --allow-questions was not set, so nothing was dispatched), contract_unsupported (the CLI has no execution contract and --contract-mode require refused to fall back) and verification_not_judged (verification exited 99, meaning the run ended error/cancelled and no gate judged the work). The rest name the first blocking condition."
+    },
+    "human_required": {
+      "type": "boolean",
+      "description": "True when the loop halted for a human: a worker raised a prompt, verification returned no verdict at all (exit 99), or the plan carried an unanswered planner question that only an edit to the issue body can resolve. None of the three is resolvable by re-dispatching. When true, no prompt was auto-answered unless auto_yes was set."
+    },
+    "plan_run_id": { "$ref": "#/$defs/run_id" },
+    "out_dir": {
+      "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }],
+      "description": "Directory the dispatch artifacts were written to. Null when nothing was written."
+    },
+    "auto_yes": {
+      "type": "boolean",
+      "description": "Whether Auto Yes was enabled. Default off: a detected prompt halts for a human rather than being answered."
+    },
+    "max_parallel": { "type": "integer", "minimum": 1, "maximum": 3 },
+    "schedule": {
+      "enum": ["wave", "dag"],
+      "description": "OPTIONAL, and written ONLY by a `--schedule dag` run (Issue #183). Which reading max_parallel and waves[] below take. ABSENT means the default wave scheduling — the plan's waves with a barrier between them — and it is absent rather than written as \"wave\" so a run without the flag is byte-for-byte the run it was before the flag existed. \"dag\": issues were admitted by DEPENDENCY SATISFACTION — an issue was dispatched as soon as every EFFECTIVE dependency of it (plan.dependencies minus the `basis: lexical` edges Issue #182 refuses to treat as edges) reached `completed` AND `verification.outcome: pass`, and a slot was free. There max_parallel is the concurrency cap and nothing else, plan.waves is reference information, and the waves[] entries below are ADMISSION ROUNDS whose `barrier` is descriptive rather than a gate. Added optionally, so reports written before this field keep validating and dispatch_schema_version stays 1."
+    },
+    "plan_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan_issues", "selected", "deselected", "inherited"],
+      "description": "OPTIONAL, and written ONLY by a run that dispatched a SUBSET of the plan (`--only`, CommandMate#3008; or a `--resume` / `--reverify` that kept the subset the prior report recorded). ABSENT means the whole plan was in scope, so a run without the flag is byte-for-byte the run it was before the field existed. It states the whole plan and the chosen subset side by side. An issue in `deselected` was neither dispatched nor judged, which is not the same as failed: it appears in the LAST waves[] entry (`dispatched: []`) as `not_dispatched` with a note saying `excluded by --only` (or as the carried pass record a prior attempt left), and is never a blocking reason. Added optionally, so reports written before this field keep validating and dispatch_schema_version stays 1.",
+      "properties": {
+        "plan_issues": { "type": "array", "items": { "type": "integer", "minimum": 1 }, "description": "Every issue of the plan, ascending." },
+        "selected": { "type": "array", "minItems": 1, "items": { "type": "integer", "minimum": 1 }, "description": "The issues this run was allowed to dispatch, ascending." },
+        "deselected": { "type": "array", "items": { "type": "integer", "minimum": 1 }, "description": "plan_issues minus selected." },
+        "inherited": { "type": "boolean", "description": "True when --only was not typed on this --resume / --reverify and the subset was carried from the prior report." }
+      }
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "repository", "base", "verified"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "repository": { "type": "string", "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$" },
+        "base": { "type": "string", "minLength": 1 },
+        "verified": { "type": "boolean" }
+      }
+    },
+    "drift_checks": {
+      "type": "array",
+      "description": "Pre-mutation drift re-checks (branch/HEAD/worktree/permission), one entry per probe, tagged with the wave they guarded.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["wave_index", "code", "ok", "blocking", "detail"],
+        "properties": {
+          "wave_index": { "type": "integer", "minimum": 0 },
+          "code": {
+            "enum": [
+              "cli_available",
+              "repo_access",
+              "base_resolvable",
+              "branch_matches",
+              "integration_clean",
+              "worktrees_present"
+            ]
+          },
+          "ok": { "type": "boolean" },
+          "blocking": {
+            "type": "boolean",
+            "description": "Whether a failure of this check blocks dispatch. A non-blocking failure becomes a limitation, not a halt."
+          },
+          "detail": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "waves": {
+      "type": "array",
+      "description": "Ordered waves, in plan order. A wave is only present if the loop reached it; a wave present with an empty dispatched list means drift halted it before any send. Under `schedule: \"dag\"` (Issue #183) an entry is an ADMISSION ROUND instead — the issues admitted at one scheduling decision, in the order the decisions were made — and rounds OVERLAP in time, so a later entry may have been dispatched while an earlier one was still running. A trailing entry with an empty dispatched list then carries the issues that were never started at all, each with a blocking reason naming why (blocked_by_upstream_failure / schedule_halted_unattended). On a `--only` run (see plan_scope) a trailing entry with an empty dispatched list carries the deselected issues instead, as `not_dispatched` with no blocking reason.",
+      "items": { "$ref": "#/$defs/wave" }
+    },
+    "blocking_reasons": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
+    "limitations": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
+    "redactions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "count"],
+        "properties": {
+          "kind": { "type": "string", "minLength": 1 },
+          "count": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "completion_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passed", "checks"],
+      "properties": {
+        "passed": { "type": "boolean" },
+        "checks": {
+          "type": "array",
+          "description": "Six checks since Skill 0.16.0; 0.15.x and earlier wrote five (everything but `verification_recorded`). The range is 5..6 so both keep validating — an additive widening, which is why dispatch_schema_version stays 1.",
+          "minItems": 5,
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "passed", "detail"],
+            "properties": {
+              "id": {
+                "enum": [
+                  "plan_approved",
+                  "drift_reconfirmed",
+                  "parallelism_bounded",
+                  "barrier_enforced",
+                  "no_auto_prompt_response",
+                  "verification_recorded"
+                ]
+              },
+              "passed": { "type": "boolean" },
+              "detail": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "summary_markdown": { "type": "string", "minLength": 1 }
+  },
+  "$defs": {
+    "run_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+    "issue_number": { "type": "integer", "minimum": 1 },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "detail"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "detail": { "type": "string", "minLength": 1 }
+      }
+    },
+    "wave": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index", "dispatched", "workers", "barrier"],
+      "properties": {
+        "index": { "type": "integer", "minimum": 0 },
+        "dispatched": {
+          "type": "array",
+          "description": "Issues actually sent in this wave. Never longer than max_parallel — under `schedule: \"dag\"` because a round only fills the FREE slots, which is that same bound read as a concurrency cap.",
+          "items": { "$ref": "#/$defs/issue_number" }
+        },
+        "workers": { "type": "array", "items": { "$ref": "#/$defs/worker" } },
+        "barrier": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["all_workers_completed", "all_verifications_passed", "advanced"],
+          "properties": {
+            "all_workers_completed": {
+              "type": "boolean",
+              "description": "Every dispatched worker reached the completed state. This alone never advances the wave."
+            },
+            "all_verifications_passed": {
+              "type": "boolean",
+              "description": "Every worker of this wave reached a passing verification verdict — the exit code of commandmate wait --verify under a contract, or a clean profile-baseline re-run without one."
+            },
+            "advanced": {
+              "type": "boolean",
+              "description": "The next wave was allowed to dispatch. True only when workers completed AND verifications passed. Under `schedule: \"dag\"` the computation is unchanged but the field is DESCRIPTIVE, not a gate: there is no next wave to allow, and what released each downstream issue is that issue's own dependency records. Read it there as \"this admission round came out wholly green\"."
+            }
+          }
+        }
+      }
+    },
+    "worker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issue", "task_id", "worker_state", "verification", "prompt", "note"],
+      "properties": {
+        "issue": { "$ref": "#/$defs/issue_number" },
+        "task_id": {
+          "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }],
+          "description": "Under an execution contract this is the task id `commandmate send --contract` returned, so the run can be traced back to the recorded task. Without one the public CLI has no task id and the field carries the CommandMate worktree id instead. Null when the worker was never dispatched."
+        },
+        "worker_state": {
+          "enum": ["completed", "failed", "timeout", "prompt", "not_dispatched"],
+          "description": "completed is worker completion only; it is not verification success. Those are gated separately. `timeout` means THIS RUNNER stopped waiting (`commandmate wait` returned exit 124); it does not mean the worker died — see worker_liveness for which of the two a given timeout was."
+        },
+        "worker_liveness": {
+          "type": "object",
+          "description": "OPTIONAL. What `commandmate capture --json` said about this worker AT THE MOMENT its `commandmate wait` timed out (Issue #179). `--wait-timeout` bounds one wait, not the worker, so a timeout is either 'the runner stopped watching' (the worker is still going and may still commit) or 'the worker stopped' — and re-dispatching on the first reading puts a second worker on top of work the first is finishing. The probe is made ONCE per timeout, never polled. ABSENT means no probe was made — the worker did not time out, or the record was transcribed from a prior attempt — and must NOT be read as 'the worker was not alive', for the same reason an absent gate `origin` is not `repo`. Added optionally, so reports written before this field keep validating and dispatch_schema_version stays 1.",
+          "additionalProperties": false,
+          "required": ["code", "is_running", "is_generating", "is_prompt_waiting", "session_status", "elapsed_seconds", "detail"],
+          "properties": {
+            "code": {
+              "enum": ["wait_window_exhausted", "worker_stalled", "worker_liveness_unreadable"],
+              "description": "wait_window_exhausted: the capture showed a live worker, so the WAIT WINDOW ran out and the recovery is to wait and re-judge in place (--reverify), never to re-dispatch. worker_stalled: the capture answered and showed no evidence of a running worker. worker_liveness_unreadable: the capture failed or its output could not be read, so NEITHER state was measured — it is never rounded to one of the other two. The same code is recorded as a blocking reason."
+            },
+            "is_running": { "oneOf": [{ "type": "null" }, { "type": "boolean" }] },
+            "is_generating": { "oneOf": [{ "type": "null" }, { "type": "boolean" }] },
+            "is_prompt_waiting": { "oneOf": [{ "type": "null" }, { "type": "boolean" }] },
+            "session_status": {
+              "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }],
+              "description": "The capture's own `sessionStatus`, transcribed. Null when it was absent or unreadable."
+            },
+            "elapsed_seconds": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Wall-clock seconds between the send that opened this worker's supervision and the liveness probe. Against `--wait-timeout` it is what shows whether one turn simply outgrew the window."
+            },
+            "detail": { "type": "string", "minLength": 1 }
+          }
+        },
+        "worker_turn_evidence": {
+          "type": "object",
+          "description": "OPTIONAL. WHY there is nothing, collected ONCE when this worker reached the `--max-turns` cap with `commandmate wait --verify` returning exit 21 (work-evidence: no commit and no uncommitted change) on every turn (Issue #220). The cap alone cannot distinguish 'the worker ran N turns and produced nothing' (the Issue is too large or too vague → split it, re-plan) from 'the worker never got a turn' (the upstream API was down → wait, then --resume), and the two recoveries are opposite — MEASURED in Kewton/CommandMate#1834, where 13 consecutive `API Error: 529 Overloaded` entries were reported as '12 turns, no work evidence'. This object adds ONLY that reading: the adjudication is untouched (`verification.outcome` stays `fail`, `worker_state` stays `failed`, blocking `worker_failed` still says why the run stopped). Collected only at that one cap — the exit-20 and pass-without-commit caps are out of scope because real work exists there. ABSENT means no collection was made (the worker did not reach that cap, or the record was transcribed from a prior attempt) and must NOT be read as 'nothing was found', for the same reason an absent `worker_liveness` is not 'the worker was not alive'. Added optionally, so reports written before this field keep validating and dispatch_schema_version stays 1.",
+          "additionalProperties": false,
+          "required": ["code", "turns", "turn_durations_seconds", "snippet_blank", "line_count", "upstream_signature", "structured_events", "transcript", "detail"],
+          "properties": {
+            "code": {
+              "enum": ["worker_upstream_unavailable", "worker_produced_nothing", "worker_output_unreadable"],
+              "description": "worker_upstream_unavailable: POSITIVE evidence that the upstream refused (a run of identical one-line errors at the end of the worker's transcript, an upstream-fault signature on its pane, hooks showing a submitted turn that never emitted `stop`, or the CLI's own `upstreamFault`). Nothing about the Issue was measured, so the recovery is to wait and --resume the SAME plan — never to split the Issue. worker_produced_nothing: POSITIVE evidence that turns really ran (tool calls or non-error assistant output in the transcript, a `stop` after the last send, non-chrome output on the pane) and still left no commit and no uncommitted change; that is a finding about the Issue. worker_output_unreadable: NEITHER positive evidence was obtained, so the runner names that rather than rounding to one of the other two — the rule merge.mjs wrote for `change_evidence_unavailable`. The same code is recorded as a blocking reason."
+            },
+            "turns": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "How many turns this worker was given before the cap. Equal to --max-turns on the path that writes this object."
+            },
+            "turn_durations_seconds": {
+              "type": "array",
+              "items": { "type": "integer", "minimum": 0 },
+              "description": "Wall-clock seconds each turn took, in order; the array's length equals `turns`. RECORDED, never adjudicated — deliberately no part of `code`. A worker that bounces off an upstream error returns to its prompt in one or two `wait` poll intervals, so twelve turns of a few seconds each is a fact a human reads instantly, while any threshold this runner picked would be a guess about model speed."
+            },
+            "snippet_blank": {
+              "oneOf": [{ "type": "null" }, { "type": "boolean" }],
+              "description": "Whether `capture --json`'s `realtimeSnippet` (the tail of the worker's pane) held nothing but whitespace. Null when the capture failed or carried no snippet. Transcribed, not adjudicated: a blank pane is normal in some states, which is why it is not evidence on its own."
+            },
+            "line_count": {
+              "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 0 }],
+              "description": "The capture's own `lineCount`, transcribed. Null when absent or unreadable. A large count beside `snippet_blank: true` is what a pane scrolled full of blank lines looks like."
+            },
+            "upstream_signature": {
+              "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }],
+              "description": "The upstream-fault text that was matched, quoted from the CLI's own output (transcript first, then the pane, then the CLI's `upstreamFault` field) — so a reader sees what was seen instead of the name of a regex. Null when no signature matched. Recorded whenever it was found, including beside `worker_produced_nothing`."
+            },
+            "structured_events": {
+              "oneOf": [
+                { "type": "null" },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["last_event_type", "last_event_at", "last_stop_event_at"],
+                  "properties": {
+                    "last_event_type": { "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }] },
+                    "last_event_at": { "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }] },
+                    "last_stop_event_at": { "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }] }
+                  }
+                }
+              ],
+              "description": "`capture --json`'s `structuredEvents`, transcribed (CommandMate 0.24.0+). A `stop` event is the only signal that says a turn ENDED rather than that a session exists. Null when the capture carried no such object — a repository with no hooks installed yields no evidence here, which is absence of evidence and never evidence of absence."
+            },
+            "transcript": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["read", "path", "trailing_identical_error_entries"],
+                  "properties": {
+                    "read": { "const": true },
+                    "path": { "type": "string", "minLength": 1, "description": "The transcript that was read, after redaction (absolute paths never reach an artifact, so this is normally [REDACTED-PATH]; `detail` carries a path-free command that recomputes it)." },
+                    "trailing_identical_error_entries": { "type": "integer", "minimum": 0, "description": "How many IDENTICAL one-line upstream errors sit at the very end of the transcript. Three or more is the positive evidence for worker_upstream_unavailable." }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["read", "reason"],
+                  "properties": {
+                    "read": { "const": false },
+                    "reason": { "type": "string", "minLength": 1 }
+                  }
+                }
+              ],
+              "description": "The worker's own agent transcript, when this runner could identify and read exactly one. `read: false` (with the reason) for every case it could not — a non-Claude `cliToolId`, no `cliToolId` at all, no transcript directory, several candidate sessions, or an unreadable file. Not reading it is never a failure of the run and never decides the code on its own."
+            },
+            "detail": { "type": "string", "minLength": 1 }
+          }
+        },
+        "worker_report": {
+          "type": "object",
+          "description": "OPTIONAL. What a worker said when it STOPPED AND REPORTED instead of pressing on (Issue #287). The supervision nudge asks a worker that finds it cannot write what it was told to stop and report (CommandMate#3009); before this field such a worker was nudged on to the `--max-turns` cap and recorded exactly like one that said nothing. Written only when a turn opened by that nudge ended without progress (contract path: `wait --verify` exit 21; fallback path: no new commit) and the worker's reply to that nudge could be read (`commandmate reply`, or for a CLI without it the Claude Code transcript, which records that nudge as its last human message followed by a final text reply). When written, supervision stopped nudging this worker at that turn. The adjudication is untouched: `worker_state` stays `failed`, blocking `worker_failed` still says why the run stopped, and a blocking `worker_stopped_with_report` beside it carries the same text. ABSENT means no report was read (no nudge was sent, the reply could not be attributed to the turn, or the capture / transcript could not be read) and must NOT be read as 'the worker said nothing'. Added optionally, so reports written before this field keep validating and dispatch_schema_version stays 1.",
+          "additionalProperties": false,
+          "required": ["code", "turn", "source", "text", "truncated"],
+          "properties": {
+            "code": { "const": "worker_stopped_with_report" },
+            "turn": {
+              "type": "integer",
+              "minimum": 2,
+              "description": "The turn whose reply this is. Always a turn opened by the nudge, so never the first."
+            },
+            "source": {
+              "enum": ["claude_transcript", "commandmate_reply"],
+              "description": "Where the text was read from: `commandmate_reply` (`commandmate reply --since <the nudge's send time> --json`, CommandMate 0.43.0+, any agent with a transcript reader; Issue #296) or `claude_transcript` (the worker's Claude Code transcript, read when the CLI has no `reply`). Never the pane: the pane (`realtimeSnippet`) holds the nudge's own echo beside the reply and cannot say which lines belong to which turn."
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 601,
+              "description": "The worker's final reply of that turn (the text after its last tool call), redacted, whitespace-collapsed and bounded to its last 600 characters with a leading '…' when cut — the runner's usual excerpt rule."
+            },
+            "truncated": { "type": "boolean", "description": "Whether `text` was cut to its tail." }
+          }
+        },
+        "verification": {
+          "type": "object",
+          "description": "The verdict that judged this worker. Recorded for EVERY worker that reached one, independently of whether the rest of the wave completed (Issue #83): the wave barrier decides whether the next wave dispatches, never whether this fact is written down. `note` never states a verification result this object does not — the sentence a human reads is rendered from these fields.",
+          "additionalProperties": false,
+          "required": ["ran", "report_schema_version", "outcome", "gates", "checks"],
+          "properties": {
+            "ran": { "type": "boolean" },
+            "report_schema_version": {
+              "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 1 }],
+              "description": "Version of the verification report the worker produced. Always null in practice: the profile baseline produces no versioned document, and CommandMate's verification run document carries no schema version either. Kept so a future versioned report can be recorded without a schema change."
+            },
+            "outcome": {
+              "enum": ["pass", "fail", "not_run"],
+              "description": "pass and fail are verdicts. not_run means NOTHING JUDGED THIS: no verification ran for this worker at all (it raised a prompt, was never dispatched, or its wait failed for infrastructure reasons), or the verification run itself ended error/cancelled (exit 99) so no gate reached a verdict. not_run is never a pass, and it is deliberately not a fail either — 'we could not judge' must not be re-instructed as 'we judged it and it failed'. Conversely, a verdict that WAS reached is recorded even when the worker did not complete (Issue #83): exit 21 is the work-evidence gate judging and failing, so it is `fail`, not 'nothing judged it'. Worker completion is reported separately in worker_state and the two are never conflated."
+            },
+            "gates": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["id", "verdict"],
+                "properties": {
+                  "id": { "type": "string", "minLength": 1 },
+                  "verdict": {
+                    "enum": ["pass", "fail", "flaky"],
+                    "description": "How the gate ruled, TRANSCRIBED from the runner's `GATE <id> PASS|FAIL|FLAKY` line and never re-derived. `flaky` (Issue #224 / CommandMate #1772) is a THIRD value, not a decoration on the other two: the gate failed and then passed on a re-run against the same tree, so neither `pass` nor `fail` was true of it. It says NOTHING about how the run counted it — that is the gate's own `flakyIsPass` declaration in verify.yaml, which is not in this report, and the run's verdict is `verification.outcome` above (the runner's exit code). A reader that maps `flaky` onto pass or fail is re-adjudicating from a display word and gets `flakyIsPass` wrong in both directions. Added as an enum value with `dispatch_schema_version` held at 1, which section 7 of dispatch-contract.md classifies as additive: every report written before it still conforms."
+                  },
+                  "origin": {
+                    "enum": ["repo", "issue"],
+                    "description": "OPTIONAL. Where this gate came from: `issue` when the issue's own ```acceptance-gates block named the id under `require:`, `repo` when the gate is part of the repository's common set and the issue said nothing about it. Added for #97's PR evidence, which must be able to say how many of the green gates ran FOR THIS ISSUE rather than only that ten gates were green. Measured: `commandmate wait --verify`'s `GATE <id> PASS|FAIL` line carries no provenance, so the value is DECIDED by the dispatch runner from the ids it resolved out of the plan and wrote into the contract — deterministic, and it fixes the reading that a declared-but-not-required gate is `repo`. ABSENT means the origin was not recorded (a runner older than this field, or the fallback baseline path) and must NOT be read as `repo`, for the same reason `not_run` is rounded to neither pass nor fail."
+                  }
+                }
+              },
+              "description": "The gates that judged this work, transcribed from `commandmate wait --verify`'s `GATE <id> PASS|FAIL|FLAKY` lines (falling back to the confirming `verify --json` run's failing gates on exit 20). Empty when nothing was judged (not_run), when the CLI printed no GATE lines, or on the fallback baseline path (whose commands are already named in checks). This is what lets the report alone answer WHAT a pass was based on (#1678 B-5). Since 0.16.0 an empty list on a contract PASS is itself reported — a `verification_gates_unrecorded` limitation plus a line in `checks` — so an unattributed pass is visible instead of reading as a pass with nothing to show (Issue #83)."
+            },
+            "checks": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+          }
+        },
+        "prompt": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["detected", "excerpt"],
+          "properties": {
+            "detected": { "type": "boolean" },
+            "excerpt": {
+              "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }],
+              "description": "Redacted excerpt of the prompt for a human. Never the raw terminal, never a secret."
+            }
+          }
+        },
+        "note": { "type": "string" }
+      }
+    }
+  }
+}

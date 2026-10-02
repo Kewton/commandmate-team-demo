@@ -1,0 +1,357 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Kewton/commandmate-skills/blob/main/skills/cmate-orchestrate/schemas/merge-report.v1.json",
+  "title": "cmate-orchestrate merge report v1",
+  "description": "Report printed to stdout and written to merge-report.json by the cmate-orchestrate merge runner (scripts/merge.mjs). Closed schema: an unknown field is a contract violation, not something a reader may ignore. It records one mutating phase — either PR creation (create_prs) or guarded merge (merge_prs) — over the verification-passed issues of an already-executed plan. A single invocation enables exactly one phase. Nothing is created or merged without explicit approval, and no PR is merged unless its CI passed; a create failure, a red or pending CI, or a merge conflict stops the phase and is reported as partial, never rounded up to success. Every property is required EXCEPT integration_verify and caller_worktree. integration_verify exists only in a run that opted into --integration-verify (Issue #175) — a report written without that flag carries the same key set, and the same bytes, as it did before the field existed. caller_worktree (Issue #222) is written by every run of either phase and is optional only so that the runner_error envelope — which stops before the probe can run — still conforms.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "merge_schema_version",
+    "skill_id",
+    "skill_version",
+    "phase",
+    "status",
+    "stop_reason",
+    "approved",
+    "mutated",
+    "merge_method",
+    "plan_run_id",
+    "out_dir",
+    "profile",
+    "eligible_issues",
+    "preflight",
+    "targets",
+    "blocking_reasons",
+    "limitations",
+    "redactions",
+    "completion_check",
+    "summary_markdown"
+  ],
+  "properties": {
+    "merge_schema_version": { "const": 1 },
+    "skill_id": { "const": "cmate-orchestrate" },
+    "skill_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "phase": {
+      "enum": ["create_prs", "merge_prs"],
+      "description": "The single mutating phase this invocation enabled. create_prs opens a PR per verification-passed issue; merge_prs checks CI and, if green and approved, merges. Exactly one is ever enabled."
+    },
+    "status": {
+      "enum": ["success", "partial", "failure"],
+      "description": "success: the phase handled every eligible issue without a failure (including a no-mutation preview). partial: the phase started but stopped early on a PR-create failure, a red/pending CI, a missing PR, or a merge conflict. failure: nothing could be attempted (preflight failed, no plan, or a bad invocation)."
+    },
+    "stop_reason": {
+      "enum": [
+        "completed",
+        "preflight_failed",
+        "pr_create_failed",
+        "pr_missing",
+        "pr_closed",
+        "ci_failed",
+        "ci_pending",
+        "merge_failed",
+        "runner_error"
+      ],
+      "description": "Why the phase stopped. completed: every eligible issue was handled. The rest name the first blocking condition; a failure is never reported as completed. No value was added for the integration verification of Issue #175: a red merged state lands on merge_failed and a requested-but-impossible verification on merge_failed (after the merges) or preflight_failed (refused before them), with blocking_reasons[].code — integration_verify_failed / integration_verify_unavailable — naming what actually happened. ci_failed and ci_pending deliberately do NOT receive it: in this report those two mean 'a PR was not merged because its CI was not green', and an integration failure happens after successful merges."
+    },
+    "approved": {
+      "type": "boolean",
+      "description": "Whether --approve was given. When false the phase is a no-mutation preview: no branch is pushed, no PR is created, and no PR is merged."
+    },
+    "mutated": {
+      "type": "boolean",
+      "description": "Whether at least one mutating command (git push, gh pr create, or gh pr merge) was actually invoked. Always false when approved is false."
+    },
+    "merge_method": {
+      "enum": ["merge", "squash", "rebase"],
+      "description": "The merge method used (or that would be used) for the merge_prs phase. Reported in both phases for completeness."
+    },
+    "plan_run_id": { "$ref": "#/$defs/run_id" },
+    "out_dir": {
+      "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }],
+      "description": "Directory the merge artifacts were written to. Null when nothing was written."
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "repository", "base", "verified"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "repository": { "type": "string", "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$" },
+        "base": { "type": "string", "minLength": 1 },
+        "verified": { "type": "boolean" }
+      }
+    },
+    "eligible_issues": {
+      "type": "array",
+      "description": "Issues drawn from the dispatch report whose worker completed AND whose verification passed. Only these are ever acted on: an unverified issue is never turned into a PR or a merge.",
+      "items": { "$ref": "#/$defs/issue_number" }
+    },
+    "preflight": {
+      "type": "array",
+      "description": "Read-only preflight probes run before any mutation (gh availability, repo access, base resolvable). A blocking failure yields status failure and nothing is attempted.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "ok", "blocking", "detail"],
+        "properties": {
+          "code": { "enum": ["cli_available", "repo_access", "base_resolvable"] },
+          "ok": { "type": "boolean" },
+          "blocking": { "type": "boolean" },
+          "detail": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "targets": {
+      "type": "array",
+      "description": "One record per eligible issue, in merge order. A target reached after the phase stopped is recorded with outcome skipped so the full set stays visible.",
+      "items": { "$ref": "#/$defs/target" }
+    },
+    "integration_verify": {
+      "$ref": "#/$defs/integration_verify",
+      "description": "Present only when --integration-verify was passed (merge_prs only, Issue #175). The wave barrier's second half: after every merge this invocation performed, the profile's post-merge verification set is run on the MERGED state of the base branch — fetched from origin and checked out into a throwaway detached worktree, so the invocation's own working tree is never touched. The set is plan.profile.integration_baseline ?? plan.profile.baseline, resolved on the KEY'S PRESENCE (Issue #195), and `source` records which one ran. Absent means the run did not verify the merged state; it never means the merged state is green."
+    },
+    "caller_worktree": {
+      "$ref": "#/$defs/caller_worktree",
+      "description": "The INVOCATION's own worktree, measured before the run starts and again immediately before the report is written (Issue #222). It exists because a merge run that finished success with a green integration verification was followed by a stale 0-byte index.lock in the caller's worktree, and the operator read that as 'the merge broke' \u2014 the merges had landed, so rolling back there would have broken the repository a second time. This runner neither writes nor removes the caller's index: it has no checkout/merge/reset/read-tree/stash/pull/update-index anywhere, and it never deletes a lock, because removing a lock another process holds corrupts the index it was protecting. Both members null is the ordinary case and is what every pre-#222 run would have recorded."
+    },
+    "blocking_reasons": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
+    "limitations": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
+    "redactions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "count"],
+        "properties": {
+          "kind": { "type": "string", "minLength": 1 },
+          "count": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "completion_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passed", "checks"],
+      "properties": {
+        "passed": { "type": "boolean" },
+        "checks": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "passed", "detail"],
+            "properties": {
+              "id": {
+                "enum": [
+                  "single_phase",
+                  "approval_enforced",
+                  "verification_gated",
+                  "ci_gated",
+                  "failures_not_rounded"
+                ]
+              },
+              "passed": { "type": "boolean" },
+              "detail": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "summary_markdown": { "type": "string", "minLength": 1 }
+  },
+  "$defs": {
+    "run_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+    "issue_number": { "type": "integer", "minimum": 1 },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "detail"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "detail": { "type": "string", "minLength": 1 }
+      }
+    },
+    "integration_verify": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requested",
+        "ran",
+        "outcome",
+        "base",
+        "base_sha",
+        "merged_issues",
+        "source",
+        "commands",
+        "failed_command",
+        "exit_code",
+        "detail"
+      ],
+      "properties": {
+        "requested": {
+          "const": true,
+          "description": "Always true: the object exists only because --integration-verify was passed."
+        },
+        "ran": {
+          "type": "boolean",
+          "description": "Whether the baseline commands were actually executed on the merged checkout. False with outcome not_run means nothing measured the merged state."
+        },
+        "outcome": {
+          "enum": ["pass", "fail", "not_run"],
+          "description": "pass: every profile baseline command exited 0 on the merged base. fail: one exited non-zero — the state the merges add up to is red even though each PR's own CI was green on a base that did not yet contain the others (integration_verify_failed). not_run: nothing was merged in this invocation, or the verification could not be performed (integration_verify_not_run / integration_verify_unavailable). not_run is never green. The next wave is dispatched only when the run is a success AND this is pass — this outcome adds a condition, it does not replace the status check."
+        },
+        "base": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The profile's base ref, transcribed. What to run and where to run it both come from the profile; no branch name and no toolchain is hardcoded in the runner."
+        },
+        "base_sha": {
+          "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }],
+          "description": "Short SHA of the fetched base tip that was verified, or null when it could not be read."
+        },
+        "merged_issues": {
+          "type": "array",
+          "description": "The issues whose PRs THIS invocation merged — the merges whose combined result is being judged. Empty means the base branch did not move here.",
+          "items": { "$ref": "#/$defs/issue_number" }
+        },
+        "source": {
+          "enum": ["integration_baseline", "baseline"],
+          "description": "WHICH profile field the commands below came from (Issue #195). integration_baseline: the profile declares that field, and it is what ran — the repository's definition of a green merged branch, which is generally heavier than what each worker runs. baseline: the profile does not declare integration_baseline, so the worker health-check list ran as the fallback (the pre-#195 behaviour, unchanged for every profile that does not declare the field). Recorded on the paths that ran nothing too, because a refusal for a DECLARED-empty integration_baseline and a refusal for a profile with no baseline at all have opposite next actions. Without this field the split would be a silent second baseline: two reports that measured different sets read identically."
+        },
+        "commands": {
+          "type": "array",
+          "description": "The commands of the field named by `source`, transcribed in profile order. Empty means that field supplies none — an absent/empty `baseline`, or an `integration_baseline` declared as [] (which states that the repository has no integration verification and is NOT answered with `baseline`) — and either way it is refused before the first merge rather than skipped.",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "failed_command": {
+          "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }],
+          "description": "The first baseline command that exited non-zero, or null."
+        },
+        "exit_code": {
+          "oneOf": [{ "type": "null" }, { "type": "integer" }],
+          "description": "That command's exit status, or null when it could not be captured."
+        },
+        "tree_removed": {
+          "type": "boolean",
+          "description": "Whether the throwaway detached checkout was removed again (Issue #222). Present exactly when `ran` is true \u2014 that is, exactly when there was a checkout to remove \u2014 and absent otherwise, so its absence means 'no checkout was created', never 'this run did not look'. False is always accompanied by the integration_verify_tree_left limitation; before this field only that failure spoke, and a successful cleanup was indistinguishable from a runner too old to say.",
+          "$comment": "Optional: a run that never reached the checkout has nothing to report here."
+        },
+        "detail": { "type": "string", "minLength": 1 }
+      }
+    },
+    "caller_worktree": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index_lock_before", "index_lock_after"],
+      "description": "Two readings of the caller worktree's index.lock, taken by `git rev-parse --git-path index.lock` (asked of git, not assembled: in a linked worktree the lock lives under <main>/.git/worktrees/<name>/) plus a stat. Null means the file was not there \u2014 or, when git could not answer at all, that nothing was measured; the report never renders 'we could not look' as 'there was no lock'. before non-null raises the limitation caller_index_lock_pre_existing and does NOT stop the run; null before and non-null after raises caller_index_lock_appeared. Both are notices: they change no verdict, and the merge and the integration verification are read first.",
+      "properties": {
+        "index_lock_before": {
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/index_lock" }],
+          "description": "The reading taken before the pre-flight, i.e. before this invocation ran any git at all."
+        },
+        "index_lock_after": {
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/index_lock" }],
+          "description": "The reading taken immediately before the report is written. A non-null value here is NOT a claim that this runner created the file \u2014 nothing in the runner writes the caller's index \u2014 and it is never removed."
+        }
+      }
+    },
+    "index_lock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "size", "mtime"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The lock's path RELATIVE to the invocation cwd (contract section 7: no absolute path reaches a report). The recovery is run from that same cwd, so it is directly usable and carries no user name."
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Size in bytes. 0 is the shape of the measured failure: a lock whose writer died before it wrote anything into it."
+        },
+        "mtime": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The lock's mtime as an ISO 8601 instant. Compared against the run's start to tell a lock that predates the run from one that appeared during it."
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "issue",
+        "branch",
+        "eligible",
+        "action",
+        "pr_number",
+        "pr_url",
+        "pushed",
+        "pr_created",
+        "ci_checked",
+        "ci_passed",
+        "ci_summary",
+        "ci_checks",
+        "merge_attempted",
+        "merged",
+        "outcome",
+        "note"
+      ],
+      "properties": {
+        "issue": { "$ref": "#/$defs/issue_number" },
+        "branch": { "type": "string", "minLength": 1 },
+        "eligible": {
+          "type": "boolean",
+          "description": "True: this issue's worker completed and its verification passed. Only eligible issues appear as targets."
+        },
+        "action": { "enum": ["create_pr", "merge_pr"] },
+        "pr_number": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/issue_number" }] },
+        "pr_url": { "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }] },
+        "pushed": {
+          "type": "boolean",
+          "description": "Whether the branch was pushed (create_prs phase only; always false in a preview or in merge_prs)."
+        },
+        "pr_created": { "type": "boolean" },
+        "ci_checked": { "type": "boolean" },
+        "ci_passed": {
+          "type": "boolean",
+          "description": "Whether every required check reported success. A merge is refused unless this is true — completion never opens the merge gate on its own."
+        },
+        "ci_summary": { "type": "string", "minLength": 1 },
+        "ci_checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "state"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "state": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "merge_attempted": { "type": "boolean" },
+        "merged": { "type": "boolean" },
+        "outcome": {
+          "enum": [
+            "previewed",
+            "pr_created",
+            "pr_failed",
+            "pr_missing",
+            "pr_closed",
+            "ci_failed",
+            "ci_pending",
+            "merged",
+            "already_merged",
+            "merge_failed",
+            "skipped"
+          ]
+        },
+        "note": { "type": "string" }
+      }
+    }
+  }
+}

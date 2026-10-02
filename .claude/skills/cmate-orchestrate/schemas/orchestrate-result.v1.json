@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Kewton/commandmate-skills/blob/main/skills/cmate-orchestrate/schemas/orchestrate-result.v1.json",
+  "title": "cmate-orchestrate result v1",
+  "description": "Result envelope printed to stdout and written to result.json by the cmate-orchestrate runner. Closed schema for the envelope. The embedded plan, when present, is validated separately against execution-plan.v2.json.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "result_schema_version",
+    "skill_id",
+    "skill_version",
+    "status",
+    "run_id",
+    "run_dir",
+    "artifacts",
+    "plan",
+    "errors",
+    "warnings",
+    "completion_check",
+    "summary_markdown"
+  ],
+  "properties": {
+    "result_schema_version": { "const": 1 },
+    "skill_id": { "const": "cmate-orchestrate" },
+    "skill_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "status": {
+      "enum": ["success", "partial", "failure"],
+      "description": "success: a plan with no warnings. partial: a plan with warnings (e.g. an external dependency). failure: no plan; errors is non-empty."
+    },
+    "run_id": { "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }] },
+    "run_dir": {
+      "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }],
+      "description": "Directory the run artifacts were written to. Null on failure, when nothing is written."
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "kind"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "kind": { "enum": ["plan", "result", "report"] }
+        }
+      }
+    },
+    "plan": {
+      "oneOf": [{ "type": "null" }, { "type": "object" }],
+      "description": "The full execution plan on success/partial, null on failure. When non-null it conforms to execution-plan.v2.json."
+    },
+    "errors": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
+    "warnings": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
+    "completion_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passed", "checks"],
+      "properties": {
+        "passed": { "type": "boolean" },
+        "checks": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "passed", "detail"],
+            "properties": {
+              "id": {
+                "enum": [
+                  "dry_run_only",
+                  "dependencies_validated",
+                  "waves_conflict_free",
+                  "run_isolated",
+                  "deterministic"
+                ]
+              },
+              "passed": { "type": "boolean" },
+              "detail": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "summary_markdown": { "type": "string", "minLength": 1 }
+  },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "detail"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "detail": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

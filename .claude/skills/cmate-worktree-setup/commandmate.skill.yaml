@@ -1,0 +1,129 @@
+schema_version: 1
+id: cmate-worktree-setup
+name: cmate-worktree-setup
+version: 0.1.7
+summary: 対象repositoryを検証し既存branch/directory/worktreeを暗黙上書きせず、profile規約に沿った専用worktreeをresolved base SHAから作成し、proportional baseline結果を証跡付きで返す。
+description: >-
+  1つ以上のIssueについて、対象リポジトリを検証し、衝突しない専用 worktree を作成し、
+  その base commit と baseline 結果を証跡付きで返す portable な標準手順である。CommandMate（Node）
+  と CommandAgent（Rust）双方の実績ある worktree 作成手順を統合し、branch 命名・directory・base・
+  baseline を profile から解決する。develop や固定 branch 名、npm、Cargo を hardcode しない。作成前に
+  Issue・branch・directory・base ref と resolved SHA・baseline command・CommandMate sync 有無・collision
+  を dry-run で提示し、確認後にのみ作成する。既存の branch・directory・worktree を暗黙に上書き・reset・
+  reuse せず、exact match の reuse も明示指定時だけ許可する。作成直前に base SHA を再確認し、drift
+  していれば作らない。dependency install は plan 表示と明示承認時だけ実行し、package lifecycle script の
+  risk と network host を承認前に列挙する。profile 別の proportional baseline を実行し、失敗しても worktree
+  を保持して診断結果を返す。CommandMate worktree sync は optional で、利用可能なら worktree ID を返し、
+  使えない環境では欠落として失敗にしない。絶対path・`..`・symlink・worktree 外 escape を拒否し、token・
+  secret・環境変数・絶対path を result や audit へ残さない。結果は versioned な result schema に適合し、
+  6つの completion check の合否を自ら申告する。server 起動停止・GitHub Project 更新・PR 作成・
+  既存worktree の強制削除・cleanup・並列 dispatch は行わない。
+capabilities:
+  - 対象repositoryの root・current/integration branch・default base・remote・既存worktreeを inspect する
+  - Node/CommandMate と Rust/CommandAgent の profile を signal で自動検出し、曖昧時は実行前に確認する
+  - Issue・branch・directory・base ref と resolved SHA・baseline・collision を dry-run plan で提示する
+  - 既存 branch/directory/worktree を暗黙上書きせず、衝突しない専用 worktree を base SHA から作成する
+  - profile 別の proportional baseline を実行し、失敗しても worktree を保持して結果を丸めず返す
+  - dependency install を明示承認時のみ行い、lifecycle script と network host を承認前に列挙する
+  - CommandMate worktree sync を optional に行い、利用可能なら worktree ID を返す
+  - 絶対path・`..`・symlink・worktree 外 escape を拒否し、secret と絶対path を result に残さない
+expected_outcomes:
+  - Issueごとに branch・directory・base SHA・baseline command を1画面で確認してから作成できる
+  - 既存の branch/directory/worktree が1件も暗黙に上書き・reset されない
+  - branch 作成元が resolved commit SHA として plan と result に記録される
+  - baseline 失敗が success に丸められず、作成済み worktree が診断のため保持される
+  - CommandMate sync を使えない環境でも worktree 作成が失敗にならず、ID は欠落として返る
+  - success/partial/failure と作成済み/未作成が後から検証できる構造化結果が得られる
+provider:
+  name: CommandMate
+  url: https://github.com/Kewton/CommandMate
+license: MIT
+homepage: https://github.com/Kewton/commandmate-skills
+keywords:
+  - worktree
+  - git
+  - setup
+  - branch
+  - baseline
+  - profile
+  - commandmate
+  - commandagent
+  - isolation
+  - onboarding
+compatibility:
+  commandmate: '>=0.11.0 <1.0.0'
+  agents:
+    - agent: claude
+      support: native
+      evidence: Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.
+    - agent: codex
+      support: native
+      evidence: Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name.
+    - agent: gemini
+      support: unknown
+      evidence: Discovery path not verified for this version
+    - agent: opencode
+      support: native
+      evidence: 'Measured 2026-08-25 on opencode 1.18.22 (CommandMate#2037) and re-checked 2026-09-04 on 1.18.27: GET /skill lists SKILL.md from .agents/skills and .claude/skills; submitting /<name> loads the skill. Scanned at boot, restart after install. Not in opencode''s own slash palette.'
+    - agent: command-code
+      support: native
+      evidence: 'Measured 2026-09-04 on Command Code 1.47.0 (CommandMate#2322): discovered from .agents/skills (cmd skills list, /skills picker); /<name> emits skill_loaded and runs. .claude/skills is not read; the installer''s .agents/skills copy suffices. No restart needed.'
+    - agent: opencode-v2
+      support: native
+      evidence: 'Measured 2026-09-29 on opencode2 2.0.18 (CommandMate#2975): GET /api/skill lists SKILL.md from .agents/skills and .claude/skills; /<name> makes the model call the skill tool. No restart needed. Not in v2''s / palette (@ and /skills only). This package was NOT separately measured.'
+requirements:
+  commands:
+    - name: commandmate
+    - name: git
+      version_range: '>=2.30.0 <3.0.0'
+  network_hosts: []
+declared_permissions:
+  - filesystem_read
+  - filesystem_write
+  - process_execution
+  - network_access
+declared_risk: moderate
+risk_rationale: >-
+  指示文と JSON schema だけで構成され、script も実行可能 file も install 時 hook も含まない。手順は
+  git と commandmate を実行して worktree を作成し（process execution）、作成先へ書き込む
+  （filesystem write）。worktree 作成自体は local の resolved SHA から行い network を必要としない。
+  network access は明示承認時の dependency install に限られ、その host は対象repositoryの package
+  manager 設定に依存するため manifest に固定せず plan で列挙する。credential は読まず、既存 branch・
+  directory・worktree を暗黙上書きせず、secret と絶対path を result へ残さない。
+files:
+  - path: SKILL.md
+    sha256: e26e19a1c26bfc0bcc8c62a74467c5ebf68547f0439cd15f8d929ae3133ef6b4
+    size: 13065
+    kind: skill_md
+    executable: false
+    script: false
+  - path: references/agent-compatibility.md
+    sha256: 95b64d1950839e0b882ff05c384a15ec7691f8a6ce8e2f91ac8a537625558671
+    size: 4766
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/profile-conventions.md
+    sha256: dbaaceb043aa79775bf46450520059aa921129012a30f8e6f98fd0d34256c651
+    size: 6698
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/result-contract.md
+    sha256: e271758d3180631596431a8d78ba8e6b76cf96692f815c36efade6b28fd5da91
+    size: 9142
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/safety.md
+    sha256: d6a4554814b4281e55dc8eac33e82d35a079d566a4632ba187e9809052007609
+    size: 7009
+    kind: instruction
+    executable: false
+    script: false
+  - path: schemas/worktree-setup.result.v1.json
+    sha256: 22cd3e65af6aad09502f667808f357a4f60fa08098f10d04a850575560530832
+    size: 15439
+    kind: asset
+    executable: false
+    script: false

@@ -1,0 +1,120 @@
+schema_version: 1
+id: cmate-acceptance-test
+name: cmate-acceptance-test
+version: 0.2.1
+summary: Issue の受入条件を証跡付きで検証し、Go / Conditional Go / No-Go を versioned な result として返す。
+description: |-
+  対象 Issue の受入条件を自動検証と手動確認に分け、command exit code、test 結果、diff、手動観察を evidence として構造化したうえで、受入の可否を判定する手順である。
+  未検証・環境依存・flaky・未承認を pass に丸めず、go / conditional_go / no_go を区別する。
+  結果は schemas/acceptance-result.v1.json に適合する JSON と、離席後でも状態を復元できる human-readable summary の両方で返す。
+  destructive・外部書き込み・high-risk な検証は、cleanup plan を添えた事前確認を経てからしか実行しない。
+  実行する command は、この Skill 自身の gh / git（読み取り用途）と、利用者が入力として渡し確認したものに限る。実装や修正は行わない。
+capabilities:
+  - Issue の受入条件を抽出し、automated / manual / not_verifiable に分類する
+  - 分類と risk に応じた test plan を提示し、危険な検証は cleanup plan つきで確認を取る
+  - command exit code、test 結果、diff、手動観察を evidence として構造化する
+  - pass / fail / flaky / blocked / not_run / manual_pending を区別して判定する
+  - go / conditional_go / no_go を、決定表に従って再現可能に導出する
+  - versioned な result document と human-readable summary を出力する
+expected_outcomes:
+  - 受入判断の根拠が、実行者の記憶ではなく evidence として残る
+  - 未検証・環境依存・flaky・未承認が pass に丸められなくなる
+  - 実行した check と実行しなかった check が、報告のうえで必ず分かれる
+  - 離席後でも、未検証項目と次 action を result から復元できる
+  - 破壊的な検証が、確認と cleanup plan を経てからしか実行されなくなる
+provider:
+  name: CommandMate
+  url: https://github.com/Kewton/CommandMate
+license: MIT
+homepage: https://github.com/Kewton/commandmate-skills
+keywords:
+  - acceptance-test
+  - verification
+  - evidence
+  - go-no-go
+  - quality-gate
+  - issue
+compatibility:
+  commandmate: '>=0.11.0 <1.0.0'
+  agents:
+    - agent: claude
+      support: native
+      evidence: Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.
+    - agent: codex
+      support: native
+      evidence: Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name.
+    - agent: gemini
+      support: unknown
+      evidence: Not verified for this version. Readable as a procedure, discovery and reload unverified.
+    - agent: opencode
+      support: native
+      evidence: 'Measured 2026-08-25 on opencode 1.18.22 (CommandMate#2037) and re-checked 2026-09-04 on 1.18.27: GET /skill lists SKILL.md from .agents/skills and .claude/skills; submitting /<name> loads the skill. Scanned at boot, restart after install. Not in opencode''s own slash palette.'
+    - agent: command-code
+      support: native
+      evidence: 'Measured 2026-09-04 on Command Code 1.47.0 (CommandMate#2322): discovered from .agents/skills (cmd skills list, /skills picker); /<name> emits skill_loaded and runs. .claude/skills is not read; the installer''s .agents/skills copy suffices. No restart needed.'
+    - agent: opencode-v2
+      support: native
+      evidence: 'Measured 2026-09-29 on opencode2 2.0.18 (CommandMate#2975): GET /api/skill lists SKILL.md from .agents/skills and .claude/skills; /<name> makes the model call the skill tool. No restart needed. Not in v2''s / palette (@ and /skills only). This package was NOT separately measured.'
+requirements:
+  commands:
+    - name: gh
+    - name: git
+  network_hosts:
+    - api.github.com
+    - github.com
+declared_permissions:
+  - filesystem_read
+  - filesystem_write
+  - process_execution
+  - network_access
+  - environment_read
+declared_risk: moderate
+risk_rationale: >-
+  Executes processes by design: read-only gh and git, plus the project test
+  commands the user passes in and confirms. Writes only the result document and
+  the evidence directory. Network use is limited to reading the issue. Environment
+  variables are checked for presence, never read into evidence. No script file and
+  no executable file ships in this package.
+files:
+  - path: SKILL.md
+    sha256: 0870823a8ef3f79b269f12e7dafc2dfbcb2e35968e1690721ecc9a0de262eb92
+    size: 13402
+    kind: skill_md
+    executable: false
+    script: false
+  - path: references/agent-compatibility.md
+    sha256: 226c200ea97ed1b84cdfe06aec4de73c9e6151cb21c9e4d85f05785b36a25b1c
+    size: 4006
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/changelog.md
+    sha256: 22beca83250a7467b8e6a95ae4ccf361ecf96e8f5f1ef651061cf208255720f5
+    size: 8693
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/evidence.md
+    sha256: 961a1ec2523c0f447cd46a927fd46fe521996669345290a4557e704472dda969
+    size: 4584
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/test-plan.md
+    sha256: e4a242e1da6f96c723bc9848ed6e513e00c73d5be0ae3d21fb1b9acb3f6a74a8
+    size: 4969
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/verdict-rubric.md
+    sha256: 9cc73192cc932a35bfed9596c98e65b454120284168124838960a73b85fce903
+    size: 5268
+    kind: instruction
+    executable: false
+    script: false
+  - path: schemas/acceptance-result.v1.json
+    sha256: f5158840b8737a9606e4da35bc0bfcab94a595eea22c723cd5a4e4229f8af658
+    size: 14912
+    kind: asset
+    executable: false
+    script: false

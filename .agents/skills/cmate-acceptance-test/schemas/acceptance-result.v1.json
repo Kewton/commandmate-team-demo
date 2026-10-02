@@ -1,0 +1,350 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Kewton/commandmate-skills/skills/cmate-acceptance-test/schemas/acceptance-result.v1.json",
+  "title": "cmate-acceptance-test result document (version 1)",
+  "description": "Versioned result of one acceptance verification run. status describes how far the verification got; verdict describes whether the change may proceed. They are independent: a run that verified everything and found one failure is status success and verdict no_go.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "result_schema_version",
+    "skill",
+    "generated_at",
+    "status",
+    "verdict",
+    "verdict_reason",
+    "target",
+    "environment",
+    "criteria",
+    "checks",
+    "confirmations",
+    "evidence",
+    "next_actions",
+    "blocking_reasons",
+    "limitations"
+  ],
+  "properties": {
+    "result_schema_version": {
+      "const": 1,
+      "description": "Schema version of this document. Bumped only for incompatible changes."
+    },
+    "skill": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": {
+          "enum": ["cmate-acceptance-test", "cmate-uat"],
+          "description": "Which Skill produced this document. Two do: cmate-acceptance-test judges a target it did not have to stand up, and cmate-uat stands the real environment up first and judges from the evidence it collected there (commandmate-skills#260). Both write THIS schema — the shape of an acceptance verdict does not depend on how the evidence was obtained — so the id is an enum rather than one Skill's name. It stays a closed enum on purpose: cmate-orchestrate's uat runner reads this document as its semantic gate, and a verdict whose author it cannot place is one it refuses (commandmate-skills#259)."
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+          "description": "Version of the Skill package that produced this document."
+        }
+      }
+    },
+    "generated_at": { "$ref": "#/$defs/timestamp" },
+    "status": {
+      "enum": ["success", "partial", "failure"],
+      "description": "success: every criterion resolved to pass or fail. partial: at least one criterion is unresolved. failure: the verification could not be carried out."
+    },
+    "verdict": {
+      "enum": ["go", "conditional_go", "no_go"],
+      "description": "conditional_go requires that every unresolved criterion has a next action with an owner."
+    },
+    "verdict_reason": { "type": "string", "minLength": 1, "maxLength": 300 },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issue_ref", "repository", "branch", "commit", "dirty"],
+      "properties": {
+        "issue_ref": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "issue_title": { "type": ["string", "null"], "maxLength": 300 },
+        "repository": {
+          "type": ["string", "null"],
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "branch": { "type": ["string", "null"], "maxLength": 200 },
+        "commit": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}$" },
+        "dirty": {
+          "type": ["boolean", "null"],
+          "description": "Whether the working tree had uncommitted changes. null when it could not be determined. A dirty tree makes the run non-reproducible and must be surfaced in the summary."
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent", "agent_version", "invocation"],
+      "properties": {
+        "agent": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "agent_version": {
+          "type": ["string", "null"],
+          "maxLength": 60,
+          "description": "null when the Agent cannot report its own version. A null here means the run is not reproducible on version alone."
+        },
+        "commandmate_version": { "type": ["string", "null"], "maxLength": 60 },
+        "invocation": {
+          "enum": ["interactive", "non_interactive"],
+          "description": "non_interactive means no confirmation could be requested, so every confirm_required check is not_run."
+        }
+      }
+    },
+    "criteria": {
+      "type": "array",
+      "minItems": 0,
+      "items": { "$ref": "#/$defs/criterion" }
+    },
+    "checks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/check" }
+    },
+    "confirmations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/confirmation" }
+    },
+    "evidence": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/evidence" }
+    },
+    "next_actions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/next_action" }
+    },
+    "blocking_reasons": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 300 },
+      "description": "Why the run could not conclude, or why the verdict is no_go. Non-empty whenever status is failure."
+    },
+    "limitations": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 300 },
+      "description": "Capabilities that were unavailable and the fallback taken instead."
+    },
+    "evidence_dir": { "type": ["string", "null"], "maxLength": 255 },
+    "summary_text": {
+      "type": ["string", "null"],
+      "maxLength": 20000,
+      "description": "The human-readable summary that was shown to the user, kept so that a later reader sees exactly what the user saw."
+    }
+  },
+  "$defs": {
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+      "description": "RFC 3339 in UTC, second precision."
+    },
+    "criterion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "text", "classification", "risk_tier", "outcome", "evidence_ids", "notes"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^AC-[0-9]{2}[a-z]?$" },
+        "text": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "classification": { "enum": ["automated", "manual", "not_verifiable"] },
+        "risk_tier": { "enum": ["safe", "confirm_required", "blocked"] },
+        "outcome": {
+          "enum": ["pass", "fail", "flaky", "blocked", "not_run", "manual_pending", "not_verifiable"],
+          "description": "Never round an unresolved outcome to pass. flaky, blocked, not_run, manual_pending and not_verifiable are distinct on purpose."
+        },
+        "evidence_ids": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^EV-[0-9]{2}$" },
+          "description": "Required to be non-empty when outcome is pass, fail or flaky."
+        },
+        "notes": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "Why this classification and this outcome. For blocked, not_run, manual_pending and not_verifiable this is the reason a reader needs."
+        }
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "description", "criterion_ids", "executed", "evidence_ids"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^CK-[0-9]{2}$" },
+        "kind": { "enum": ["command", "test", "diff", "manual_observation"] },
+        "description": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "criterion_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "pattern": "^AC-[0-9]{2}[a-z]?$" }
+        },
+        "risk_tier": { "enum": ["safe", "confirm_required", "blocked"] },
+        "executed": { "type": "boolean" },
+        "skip_reason": {
+          "type": ["string", "null"],
+          "maxLength": 300,
+          "description": "Required to be a non-empty string when executed is false."
+        },
+        "evidence_ids": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^EV-[0-9]{2}$" }
+        }
+      }
+    },
+    "confirmation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["check_id", "risk_tier", "requested", "granted", "cleanup_plan"],
+      "properties": {
+        "check_id": { "type": "string", "pattern": "^CK-[0-9]{2}$" },
+        "risk_tier": { "enum": ["safe", "confirm_required", "blocked"] },
+        "requested": { "type": "boolean" },
+        "granted": {
+          "type": ["boolean", "null"],
+          "description": "null when no answer was obtained. null is never treated as true."
+        },
+        "cleanup_plan": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000,
+          "description": "What is created, how it is reverted, what cannot be reverted, and what is left behind if the cleanup itself fails."
+        },
+        "cleanup_outcome": { "enum": ["not_needed", "succeeded", "failed", "manual_required"] },
+        "note": { "type": ["string", "null"], "maxLength": 300 }
+      }
+    },
+    "next_action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "owner"],
+      "properties": {
+        "action": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "owner": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Who does it. An unassigned action is not a next action."
+        },
+        "criterion_ids": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^AC-[0-9]{2}[a-z]?$" }
+        }
+      }
+    },
+    "evidence": {
+      "oneOf": [
+        { "$ref": "#/$defs/evidence_command" },
+        { "$ref": "#/$defs/evidence_test" },
+        { "$ref": "#/$defs/evidence_diff" },
+        { "$ref": "#/$defs/evidence_manual" }
+      ]
+    },
+    "evidence_command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "collected_at", "summary", "redacted", "command", "exit_code"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^EV-[0-9]{2}$" },
+        "type": { "const": "command" },
+        "collected_at": { "$ref": "#/$defs/timestamp" },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "redacted": { "type": "boolean" },
+        "path": { "type": ["string", "null"], "maxLength": 255 },
+        "command": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "exit_code": {
+          "type": ["integer", "null"],
+          "minimum": -1,
+          "maximum": 255,
+          "description": "Measured, never assumed. null when the process was killed or timed out; never write 0 in that case."
+        },
+        "duration_ms": { "type": ["integer", "null"], "minimum": 0 },
+        "output_excerpt": { "type": ["string", "null"], "maxLength": 4000 },
+        "truncated": { "type": "boolean" },
+        "attempts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["attempt", "exit_code"],
+            "properties": {
+              "attempt": { "type": "integer", "minimum": 1 },
+              "exit_code": { "type": ["integer", "null"], "minimum": -1, "maximum": 255 }
+            }
+          },
+          "description": "Present when the command was run more than once. Differing exit codes mean flaky, not pass."
+        }
+      }
+    },
+    "evidence_test": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "collected_at", "summary", "redacted", "framework", "total", "passed", "failed", "skipped"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^EV-[0-9]{2}$" },
+        "type": { "const": "test" },
+        "collected_at": { "$ref": "#/$defs/timestamp" },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "redacted": { "type": "boolean" },
+        "path": { "type": ["string", "null"], "maxLength": 255 },
+        "framework": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "total": { "type": "integer", "minimum": 0 },
+        "passed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "skipped": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Never folded into passed."
+        },
+        "failed_tests": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 300 }
+        }
+      }
+    },
+    "evidence_diff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "collected_at", "summary", "redacted", "commit", "changed_files"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^EV-[0-9]{2}$" },
+        "type": { "const": "diff" },
+        "collected_at": { "$ref": "#/$defs/timestamp" },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "redacted": { "type": "boolean" },
+        "path": { "type": ["string", "null"], "maxLength": 255 },
+        "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "changed_files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "added", "removed"],
+            "properties": {
+              "path": { "type": "string", "minLength": 1, "maxLength": 255 },
+              "added": { "type": "integer", "minimum": 0 },
+              "removed": { "type": "integer", "minimum": 0 }
+            }
+          },
+          "description": "Paths and line counts only. File contents are not evidence and are not recorded here."
+        }
+      }
+    },
+    "evidence_manual": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "collected_at", "summary", "redacted", "observer", "procedure", "observed", "conclusion"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^EV-[0-9]{2}$" },
+        "type": { "const": "manual_observation" },
+        "collected_at": { "$ref": "#/$defs/timestamp" },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "redacted": { "type": "boolean" },
+        "path": { "type": ["string", "null"], "maxLength": 255 },
+        "observer": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "procedure": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "observed": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000,
+          "description": "The fact that was observed, not its interpretation."
+        },
+        "conclusion": { "type": "string", "minLength": 1, "maxLength": 500 }
+      }
+    }
+  }
+}
